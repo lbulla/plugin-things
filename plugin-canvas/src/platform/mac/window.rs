@@ -200,7 +200,7 @@ impl Drop for OsWindow {
     fn drop(&mut self) {
         if let Some(display_link) = self.display_link.borrow().as_ref() {
             unsafe {
-                display_link.removeFromRunLoop_forMode(&NSRunLoop::mainRunLoop(), NSDefaultRunLoopMode)
+                display_link.invalidate();
             };
         }
 

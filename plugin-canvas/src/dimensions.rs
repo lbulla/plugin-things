@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use std::ops::Mul;
 
 #[derive(Clone, Debug, Default)]
@@ -62,7 +63,7 @@ where
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 pub struct LogicalSize {
     pub width: f64,
     pub height: f64,

@@ -2,11 +2,15 @@ use std::cell::OnceCell;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
+use plugin_canvas::{Event, event::EventResponse, window::WindowAttributes};
 use raw_window_handle::RawWindowHandle;
-use plugin_canvas::{event::EventResponse, window::WindowAttributes, Event};
 use slint::platform::WindowAdapter;
 
-use crate::{platform::PluginCanvasPlatform, view::PluginView, window_adapter::{PluginCanvasWindowAdapter, WINDOW_ADAPTER_FROM_SLINT, WINDOW_TO_SLINT}};
+use crate::{
+    platform::PluginCanvasPlatform,
+    view::PluginView,
+    window_adapter::{PluginCanvasWindowAdapter, WINDOW_ADAPTER_FROM_SLINT, WINDOW_TO_SLINT},
+};
 
 pub struct SlintEditor;
 
@@ -14,41 +18,38 @@ impl SlintEditor {
     pub fn open<C, B>(
         parent: RawWindowHandle,
         window_attributes: WindowAttributes,
-        view_builder: B
-    ) -> Rc<EditorHandle>
+        view_builder: B,
+    ) -> Arc<EditorHandle>
     where
         C: PluginView + 'static,
         B: Fn(Arc<plugin_canvas::Window>) -> C + 'static,
     {
-        let editor_handle = Rc::new(EditorHandle::new());
+        let editor_handle = Arc::new(EditorHandle::new());
 
-        let window = plugin_canvas::Window::open(
-            parent,
-            window_attributes.clone(),
-            {
-                let editor_weak_ptr = Rc::downgrade(&editor_handle).into_raw();
-                let editor_thread = std::thread::current().id();
+        let window = plugin_canvas::Window::open(parent, window_attributes.clone(), {
+            let editor_weak_ptr = Arc::downgrade(&editor_handle).into_raw();
+            let editor_thread = std::thread::current().id();
 
-                Box::new(move |event| {
-                    if std::thread::current().id() != editor_thread {
-                        log::warn!("Tried to call event callback from non-editor thread");
-                        return EventResponse::Ignored;
-                    }
+            Box::new(move |event| {
+                if std::thread::current().id() != editor_thread {
+                    log::warn!("Tried to call event callback from non-editor thread");
+                    return EventResponse::Ignored;
+                }
 
-                    let editor_weak = unsafe { Weak::from_raw(editor_weak_ptr) };                    
-                    let response = if let Some(editor_handle) = editor_weak.upgrade() {
-                        editor_handle.on_event(&event)
-                    } else {
-                        EventResponse::Ignored
-                    };
+                let editor_weak = unsafe { Weak::from_raw(editor_weak_ptr) };
+                let response = if let Some(editor_handle) = editor_weak.upgrade() {
+                    editor_handle.on_event(&event)
+                } else {
+                    EventResponse::Ignored
+                };
 
-                    // Leak the weak reference to avoid dropping it
-                    let _ = editor_weak.into_raw();
+                // Leak the weak reference to avoid dropping it
+                let _ = editor_weak.into_raw();
 
-                    response
-                })
-            },
-        ).unwrap();
+                response
+            })
+        })
+        .unwrap();
 
         // It's ok if this fails as it just means it has already been set
         slint::platform::set_platform(Box::new(PluginCanvasPlatform)).ok();
@@ -99,7 +100,7 @@ impl EditorHandle {
         }
     }
 
-    fn window_adapter(&self) -> Option<&PluginCanvasWindowAdapter> {
+    pub fn window_adapter(&self) -> Option<&PluginCanvasWindowAdapter> {
         self.window_adapter.get().map(|adapter| &**adapter)
     }
 
@@ -113,7 +114,7 @@ impl EditorHandle {
         } else {
             EventResponse::Ignored
         }
-    } 
+    }
 }
 
 impl Drop for EditorHandle {
