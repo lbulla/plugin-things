@@ -5,3 +5,4 @@ pub mod window_adapter;
 
 // Re-exports
 pub use plugin_canvas;
+pub use slint;
