@@ -14,18 +14,35 @@ cursor-icon.workspace = true
 keyboard-types.workspace = true
 raw-window-handle.workspace = true
 serde = { version = "1.0", features = ["derive"] }
-uuid = { version = "1.4", features = ["fast-rng", "v4"] }
 
 [target.'cfg(target_os="linux")'.dependencies]
 sys-locale = "0.3"
-x11rb = { version = "0.13", features = ["allow-unsafe-code", "cursor", "render", "resource_manager", "xfixes", "xkb"] }
+x11rb = { version = "0.13", features = [
+    "allow-unsafe-code",
+    "cursor",
+    "render",
+    "resource_manager",
+    "xfixes",
+    "xkb",
+] }
 xkbcommon = { version = "0.8", features = ["x11"] }
 
 [target.'cfg(target_os="macos")'.dependencies]
 objc2 = { version = "0.6", features = ["verify"] }
-objc2-app-kit = { version = "0.3", features = ["NSCursor", "NSDragging", "NSEvent", "NSPasteboard", "NSPasteboardItem", "NSScreen", "NSTrackingArea"] }
+objc2-app-kit = { version = "0.3", features = [
+    "NSCursor",
+    "NSDragging",
+    "NSEvent",
+    "NSPasteboard",
+    "NSPasteboardItem",
+    "NSScreen",
+    "NSTrackingArea",
+] }
 objc2-core-foundation = { version = "0.3", features = ["CFCGTypes"] }
-objc2-core-graphics = { version = "0.3", features = ["CGError", "CGRemoteOperation"] }
+objc2-core-graphics = { version = "0.3", features = [
+    "CGError",
+    "CGRemoteOperation",
+] }
 objc2-core-video = "0.3"
 objc2-foundation = { version = "0.3", features = ["NSOperation", "NSRunLoop"] }
 objc2-quartz-core = { version = "0.3", features = ["CADisplayLink"] }
@@ -53,3 +70,21 @@ features = [
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ]
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+uuid = { version = "1.16.0", features = ["fast-rng", "v4"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+uuid = { version = "1.16.0", features = ["fast-rng", "v4", "js"] }
+web-sys = { version = "0.3.77", features = [
+    "CssStyleDeclaration",
+    "DataTransfer",
+    "DomRect",
+    "DragEvent",
+    "File",
+    "FileList",
+    "HtmlCanvasElement",
+    "KeyboardEvent",
+    "PointerEvent",
+    "WheelEvent",
+] }
