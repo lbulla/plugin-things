@@ -1,11 +1,13 @@
 use cursor_icon::CursorIcon;
-use raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawWindowHandle};
+use raw_window_handle::RawWindowHandle;
 
-use crate::{error::Error, event::EventCallback, window::WindowAttributes, LogicalPosition, LogicalSize};
+use crate::{
+    LogicalPosition, LogicalSize, error::Error, event::EventCallback, window::WindowAttributes,
+};
 
 use super::os_window_handle::OsWindowHandle;
 
-pub(crate) trait OsWindowInterface: HasDisplayHandle + HasWindowHandle + Sized {
+pub(crate) trait OsWindowInterface: Sized {
     fn open(
         parent_window_handle: RawWindowHandle,
         window_attributes: WindowAttributes,
@@ -21,4 +23,9 @@ pub(crate) trait OsWindowInterface: HasDisplayHandle + HasWindowHandle + Sized {
     fn warp_mouse(&self, position: LogicalPosition);
 
     fn poll_events(&self) -> Result<(), Error>;
+}
+
+#[cfg(target_arch = "wasm32")]
+pub trait HtmlCanvasInterface {
+    fn canvas(&self) -> web_sys::HtmlCanvasElement;
 }

@@ -1,6 +1,7 @@
-use std::sync::Arc;
 use std::ops::Deref;
+use std::sync::Arc;
 
+#[cfg(not(target_arch = "wasm32"))]
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 
 use crate::thread_bound::ThreadBound;
@@ -13,9 +14,7 @@ pub(crate) struct OsWindowHandle {
 
 impl OsWindowHandle {
     pub(super) fn new(os_window: Arc<ThreadBound<OsWindow>>) -> Self {
-        Self {
-            os_window,
-        }
+        Self { os_window }
     }
 }
 
@@ -27,14 +26,20 @@ impl Deref for OsWindowHandle {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl HasWindowHandle for OsWindowHandle {
-    fn window_handle(&self) -> Result<raw_window_handle::WindowHandle<'_>, raw_window_handle::HandleError> {
+    fn window_handle(
+        &self,
+    ) -> Result<raw_window_handle::WindowHandle<'_>, raw_window_handle::HandleError> {
         self.os_window.as_ref().window_handle()
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl HasDisplayHandle for OsWindowHandle {
-    fn display_handle(&self) -> Result<raw_window_handle::DisplayHandle<'_>, raw_window_handle::HandleError> {
+    fn display_handle(
+        &self,
+    ) -> Result<raw_window_handle::DisplayHandle<'_>, raw_window_handle::HandleError> {
         self.os_window.as_ref().display_handle()
     }
 }

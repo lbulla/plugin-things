@@ -29,7 +29,6 @@ slint = { version = "1.14.1", default-features = false, features = ["accessibili
 # since they don't maintain semver compatibility
 i-slint-common = "1.14.1"
 i-slint-core = "1.14.1"
-i-slint-renderer-skia = { version = "1.14.1", features = ["x11"] }
 
 [patch.crates-io]
 # FIXME: Needed for loading cursors to work, remove once the fix has shipped

@@ -1,12 +1,18 @@
 use cursor_icon::CursorIcon;
-use raw_window_handle::{RawWindowHandle, HasWindowHandle, HasDisplayHandle};
+use raw_window_handle::RawWindowHandle;
 
-use crate::platform::os_window_handle::OsWindowHandle;
+#[cfg(not(target_arch = "wasm32"))]
+use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
+
+#[cfg(target_arch = "wasm32")]
+use crate::HtmlCanvasInterface;
+
 use crate::LogicalPosition;
 use crate::dimensions::LogicalSize;
 use crate::error::Error;
 use crate::event::EventCallback;
-use crate::platform::{window::OsWindow, interface::OsWindowInterface};
+use crate::platform::os_window_handle::OsWindowHandle;
+use crate::platform::{interface::OsWindowInterface, window::OsWindow};
 
 #[derive(Clone)]
 pub struct WindowAttributes {
@@ -16,10 +22,7 @@ pub struct WindowAttributes {
 
 impl WindowAttributes {
     pub fn new(size: LogicalSize, scale: f64) -> Self {
-        Self {
-            size,
-            scale,
-        }
+        Self { size, scale }
     }
 
     pub fn with_size(size: LogicalSize) -> Self {
@@ -50,11 +53,7 @@ impl Window {
         attributes: WindowAttributes,
         event_callback: Box<EventCallback>,
     ) -> Result<Window, Error> {
-        let os_window_handle = OsWindow::open(
-            parent,
-            attributes.clone(),
-            event_callback,
-        )?;
+        let os_window_handle = OsWindow::open(parent, attributes.clone(), event_callback)?;
 
         Ok(Self {
             attributes,
@@ -92,14 +91,27 @@ impl Window {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl HasWindowHandle for Window {
-    fn window_handle(&self) -> Result<raw_window_handle::WindowHandle<'_>, raw_window_handle::HandleError> {
+    fn window_handle(
+        &self,
+    ) -> Result<raw_window_handle::WindowHandle<'_>, raw_window_handle::HandleError> {
         self.os_window_handle.window_handle()
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl HasDisplayHandle for Window {
-    fn display_handle(&self) -> Result<raw_window_handle::DisplayHandle<'_>, raw_window_handle::HandleError> {
+    fn display_handle(
+        &self,
+    ) -> Result<raw_window_handle::DisplayHandle<'_>, raw_window_handle::HandleError> {
         self.os_window_handle.display_handle()
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl HtmlCanvasInterface for Window {
+    fn canvas(&self) -> web_sys::HtmlCanvasElement {
+        self.os_window_handle.canvas()
     }
 }

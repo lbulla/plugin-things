@@ -10,4 +10,7 @@ pub use dimensions::{LogicalPosition, LogicalSize, PhysicalPosition, PhysicalSiz
 pub use event::{Event, MouseButton};
 pub use window::Window;
 
+#[cfg(target_arch = "wasm32")]
+pub use platform::interface::HtmlCanvasInterface;
+
 mod platform;

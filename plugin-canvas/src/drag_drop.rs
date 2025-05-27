@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum DropOperation {
     None,
@@ -12,5 +10,8 @@ pub enum DropOperation {
 pub enum DropData {
     #[default]
     None,
-    Files(Vec<PathBuf>),
+    #[cfg(not(target_arch = "wasm32"))]
+    Files(Vec<std::path::PathBuf>),
+    #[cfg(target_arch = "wasm32")]
+    Files(Vec<web_sys::File>),
 }

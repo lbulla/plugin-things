@@ -1,16 +1,27 @@
 use std::cell::RefCell;
 use std::fmt::Debug;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering, AtomicUsize};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use cursor_icon::CursorIcon;
-use i_slint_core::{window::{WindowAdapter, WindowAdapterInternal}, renderer::Renderer, platform::{PlatformError, WindowEvent}};
-use i_slint_renderer_skia::{SkiaRenderer, SkiaSharedContext};
+use i_slint_core::{
+    platform::{PlatformError, WindowEvent},
+    window::{WindowAdapter, WindowAdapterInternal},
+};
 use keyboard_types::Code;
 use plugin_canvas::keyboard::KeyboardModifiers;
-use plugin_canvas::{event::EventResponse, LogicalSize};
+use plugin_canvas::{LogicalSize, event::EventResponse};
 use portable_atomic::AtomicF64;
+
+#[cfg(target_arch = "wasm32")]
+use i_slint_renderer_femtovg::FemtoVGOpenGLRenderer as Renderer;
+#[cfg(not(target_arch = "wasm32"))]
+use i_slint_renderer_skia::SkiaRenderer as Renderer;
+#[cfg(not(target_arch = "wasm32"))]
+use i_slint_renderer_skia::SkiaSharedContext;
+#[cfg(target_arch = "wasm32")]
+use plugin_canvas::HtmlCanvasInterface;
 
 use crate::view::PluginView;
 
@@ -22,7 +33,7 @@ thread_local! {
 pub struct PluginCanvasWindowAdapter {
     plugin_canvas_window: Arc<plugin_canvas::Window>,
     slint_window: slint::Window,
-    renderer: SkiaRenderer,
+    renderer: Renderer,
 
     view: RefCell<Option<Box<dyn PluginView>>>,
 
@@ -40,7 +51,7 @@ impl PluginCanvasWindowAdapter {
     #[allow(clippy::new_ret_no_self)]
     pub fn new() -> Result<Rc<dyn WindowAdapter>, PlatformError> {
         let plugin_canvas_window = WINDOW_TO_SLINT.take().unwrap();
-        
+
         let window_attributes = plugin_canvas_window.attributes();
 
         let scale = window_attributes.scale();
@@ -52,18 +63,29 @@ impl PluginCanvasWindowAdapter {
             height: plugin_canvas_size.height as u32,
         };
 
-        let skia_context = SkiaSharedContext::default();        
+        #[cfg(not(target_arch = "wasm32"))]
+        let renderer = {
+            let skia_context = SkiaSharedContext::default();
 
-        #[cfg(target_os="windows")]
-        let renderer = SkiaRenderer::default_direct3d(&skia_context);
-        #[cfg(not(target_os="windows"))]
-        let renderer = SkiaRenderer::default(&skia_context);
+            #[cfg(not(target_os = "windows"))]
+            let renderer = Renderer::default(&skia_context);
+            #[cfg(target_os = "windows")]
+            let renderer = Renderer::default_direct3d(&skia_context);
 
-        renderer.set_window_handle(plugin_canvas_window.clone(), plugin_canvas_window.clone(), slint_size, None)?;
+            renderer.set_window_handle(
+                plugin_canvas_window.clone(),
+                plugin_canvas_window.clone(),
+                slint_size,
+                None,
+            )?;
+            renderer
+        };
+        #[cfg(target_arch = "wasm32")]
+        let renderer = Renderer::new(plugin_canvas_window.canvas())?;
 
         let self_rc = Rc::new_cyclic(|self_weak| {
             let slint_window = slint::Window::new(self_weak.clone() as _);
-            
+
             Self {
                 plugin_canvas_window,
                 slint_window,
@@ -82,9 +104,11 @@ impl PluginCanvasWindowAdapter {
             }
         });
 
-        self_rc.slint_window.dispatch_event(
-            WindowEvent::ScaleFactorChanged { scale_factor: combined_scale as f32 }
-        );
+        self_rc
+            .slint_window
+            .dispatch_event(WindowEvent::ScaleFactorChanged {
+                scale_factor: combined_scale as f32,
+            });
 
         WINDOW_ADAPTER_FROM_SLINT.set(Some(self_rc.clone()));
 
@@ -96,19 +120,41 @@ impl PluginCanvasWindowAdapter {
     }
 
     pub fn set_scale(&self, scale: f64) {
+        let old_scale = self.scale.load(Ordering::Acquire);
+        let scale_delta = scale / old_scale;
+        let old_physical_size = self.size();
+
         self.scale.store(scale, Ordering::Release);
 
         let combined_scale = scale * self.plugin_canvas_window.os_scale();
-        
-        self.slint_window.dispatch_event(
-            WindowEvent::ScaleFactorChanged { scale_factor: combined_scale as f32 }
+
+        self.slint_window
+            .dispatch_event(WindowEvent::ScaleFactorChanged {
+                scale_factor: combined_scale as f32,
+            });
+
+        self.set_size(
+            slint::PhysicalSize::new(
+                (old_physical_size.width as f64 * scale_delta).round() as u32,
+                (old_physical_size.height as f64 * scale_delta).round() as u32,
+            )
+            .into(),
         );
+    }
+
+    pub fn logical_size(&self) -> slint::LogicalSize {
+        let combined_scale =
+            self.scale.load(Ordering::Acquire) * self.plugin_canvas_window.os_scale();
+        self.physical_size
+            .borrow_mut()
+            .to_logical(combined_scale as _)
     }
 
     pub fn close(&self) {
         // Remove component to unravel the cyclic reference
         self.view.borrow_mut().take();
-        self.slint_window.dispatch_event(WindowEvent::CloseRequested);
+        self.slint_window
+            .dispatch_event(WindowEvent::CloseRequested);
     }
 
     pub fn on_event(&self, event: &plugin_canvas::Event) -> EventResponse {
@@ -121,36 +167,38 @@ impl PluginCanvasWindowAdapter {
         let built_in_response = match event {
             plugin_canvas::Event::Draw => {
                 match self.plugin_canvas_window.poll_events() {
-                    Ok(_) => {},
+                    Ok(_) => {}
                     Err(e) => {
                         log::error!("Error polling events: {e:?}");
                     }
                 }
 
                 i_slint_core::platform::update_timers_and_animations();
-                
+
                 if self.pending_draw.swap(false, Ordering::Relaxed) {
                     self.renderer.render().unwrap();
                 }
 
                 EventResponse::Handled
-            },
+            }
 
             plugin_canvas::Event::KeyDown { key_code, text } => {
                 if let Some(text) = Self::convert_key(*key_code, text) {
-                    self.slint_window.dispatch_event(WindowEvent::KeyPressed { text: text.into() });
+                    self.slint_window
+                        .dispatch_event(WindowEvent::KeyPressed { text: text.into() });
                 }
 
                 EventResponse::Handled
-            },
+            }
 
             plugin_canvas::Event::KeyUp { key_code, text } => {
                 if let Some(text) = Self::convert_key(*key_code, text) {
-                    self.slint_window.dispatch_event(WindowEvent::KeyReleased { text: text.into() });
+                    self.slint_window
+                        .dispatch_event(WindowEvent::KeyReleased { text: text.into() });
                 }
 
                 EventResponse::Handled
-            },
+            }
 
             plugin_canvas::Event::KeyboardModifiers { modifiers } => {
                 let mut my_modifiers = self.modifiers.borrow_mut();
@@ -159,7 +207,7 @@ impl PluginCanvasWindowAdapter {
                     KeyboardModifiers::Alt,
                     KeyboardModifiers::Control,
                     KeyboardModifiers::Meta,
-                    KeyboardModifiers::Shift
+                    KeyboardModifiers::Shift,
                 ] {
                     // TODO: This is mildly janky, could we clean it up?
                     macro_rules! modifier_to_char {
@@ -170,15 +218,11 @@ impl PluginCanvasWindowAdapter {
                                 $(
                                     else if modifier == KeyboardModifiers::Alt && stringify!($name) == "Alt" {
                                         $char
+                                    } else if modifier == KeyboardModifiers::Control && stringify!($name) == "Control" {
+                                        $char
+                                    } else if modifier == KeyboardModifiers::Meta && stringify!($name) == "Meta" {
+                                        $char
                                     } else if modifier == KeyboardModifiers::Shift && stringify!($name) == "Shift" {
-                                        $char
-                                    } else if cfg!(target_os="macos") && modifier == KeyboardModifiers::Meta && stringify!($name) == "Control" {
-                                        $char
-                                    } else if cfg!(target_os="macos") && modifier == KeyboardModifiers::Control && stringify!($name) == "Meta" {
-                                            $char
-                                    } else if !cfg!(target_os="macos") && modifier == KeyboardModifiers::Control && stringify!($name) == "Control" {
-                                            $char
-                                    } else if !cfg!(target_os="macos") && modifier == KeyboardModifiers::Meta && stringify!($name) == "Meta" {
                                         $char
                                     }
                                 )*
@@ -196,32 +240,36 @@ impl PluginCanvasWindowAdapter {
                     let text = i_slint_common::for_each_special_keys!(modifier_to_char);
 
                     if !was_pressed && pressed {
-                        self.slint_window.dispatch_event(WindowEvent::KeyPressed { text: text.into() });
+                        self.slint_window
+                            .dispatch_event(WindowEvent::KeyPressed { text: text.into() });
                     }
                     if was_pressed && !pressed {
-                        self.slint_window.dispatch_event(WindowEvent::KeyReleased { text: text.into() });
+                        self.slint_window
+                            .dispatch_event(WindowEvent::KeyReleased { text: text.into() });
                     }
                 }
 
                 *my_modifiers = *modifiers;
 
                 EventResponse::Handled
-            },
+            }
 
             plugin_canvas::Event::MouseButtonDown { button, position } => {
                 let button = Self::convert_button(button);
                 let position = self.convert_logical_position(position);
                 self.buttons_down.fetch_add(1, Ordering::Relaxed);
 
-                self.slint_window.dispatch_event(WindowEvent::PointerPressed { position, button });
+                self.slint_window
+                    .dispatch_event(WindowEvent::PointerPressed { position, button });
                 EventResponse::Handled
-            },
+            }
 
             plugin_canvas::Event::MouseButtonUp { button, position } => {
                 let button = Self::convert_button(button);
                 let position = self.convert_logical_position(position);
-                
-                self.slint_window.dispatch_event(WindowEvent::PointerReleased { position, button });
+
+                self.slint_window
+                    .dispatch_event(WindowEvent::PointerReleased { position, button });
 
                 let buttons_down = self.buttons_down.fetch_sub(1, Ordering::Relaxed);
                 if buttons_down == 1 && self.pending_mouse_exit.swap(false, Ordering::Relaxed) {
@@ -229,7 +277,7 @@ impl PluginCanvasWindowAdapter {
                 }
 
                 EventResponse::Handled
-            },
+            }
 
             plugin_canvas::Event::MouseExited => {
                 if self.buttons_down.load(Ordering::Relaxed) > 0 {
@@ -240,43 +288,42 @@ impl PluginCanvasWindowAdapter {
                 }
 
                 EventResponse::Handled
-            },
+            }
 
             plugin_canvas::Event::MouseMoved { position } => {
                 let position = self.convert_logical_position(position);
-                self.slint_window.dispatch_event(WindowEvent::PointerMoved { position });
+                self.slint_window
+                    .dispatch_event(WindowEvent::PointerMoved { position });
                 EventResponse::Handled
-            },
-            
-            plugin_canvas::Event::MouseWheel { position, delta_x, delta_y } => {
+            }
+
+            plugin_canvas::Event::MouseWheel {
+                position,
+                delta_x,
+                delta_y,
+            } => {
                 let position = self.convert_logical_position(position);
-                self.slint_window.dispatch_event(
-                    WindowEvent::PointerScrolled {
+                self.slint_window
+                    .dispatch_event(WindowEvent::PointerScrolled {
                         position,
                         delta_x: *delta_x as f32,
                         delta_y: *delta_y as f32,
-                    }
-                );
+                    });
                 EventResponse::Handled
-            },
-            
-            plugin_canvas::Event::DragEntered { .. } => {
-                EventResponse::Ignored
-            },
+            }
 
-            plugin_canvas::Event::DragExited => {
-                EventResponse::Ignored
-            },
+            plugin_canvas::Event::DragEntered { .. } => EventResponse::Ignored,
+
+            plugin_canvas::Event::DragExited => EventResponse::Ignored,
 
             plugin_canvas::Event::DragMoved { position, .. } => {
                 let position = self.convert_logical_position(position);
-                self.slint_window.dispatch_event(WindowEvent::PointerMoved { position });
+                self.slint_window
+                    .dispatch_event(WindowEvent::PointerMoved { position });
                 EventResponse::Handled
-            },
+            }
 
-            plugin_canvas::Event::DragDropped { .. } => {
-                EventResponse::Ignored
-            },
+            plugin_canvas::Event::DragDropped { .. } => EventResponse::Ignored,
         };
 
         if component_response != EventResponse::Ignored {
@@ -286,11 +333,15 @@ impl PluginCanvasWindowAdapter {
         }
     }
 
-    fn convert_button(button: &plugin_canvas::MouseButton) -> i_slint_core::platform::PointerEventButton {
+    fn convert_button(
+        button: &plugin_canvas::MouseButton,
+    ) -> i_slint_core::platform::PointerEventButton {
         match button {
             plugin_canvas::MouseButton::Left => i_slint_core::platform::PointerEventButton::Left,
             plugin_canvas::MouseButton::Right => i_slint_core::platform::PointerEventButton::Right,
-            plugin_canvas::MouseButton::Middle => i_slint_core::platform::PointerEventButton::Middle,
+            plugin_canvas::MouseButton::Middle => {
+                i_slint_core::platform::PointerEventButton::Middle
+            }
         }
     }
 
@@ -305,11 +356,14 @@ impl PluginCanvasWindowAdapter {
             Code::ArrowDown => Some("\u{F701}".into()),
             Code::ArrowLeft => Some("\u{F702}".into()),
             Code::ArrowRight => Some("\u{F703}".into()),
-            _ => text.clone()
+            _ => text.clone(),
         }
     }
 
-    fn convert_logical_position(&self, position: &plugin_canvas::LogicalPosition) -> slint::LogicalPosition {
+    fn convert_logical_position(
+        &self,
+        position: &plugin_canvas::LogicalPosition,
+    ) -> slint::LogicalPosition {
         let scale = self.scale.load(Ordering::Acquire);
 
         slint::LogicalPosition {
@@ -345,25 +399,26 @@ impl WindowAdapter for PluginCanvasWindowAdapter {
         let os_scale = self.plugin_canvas_window.os_scale();
 
         let physical_size = size.to_physical(os_scale as _);
-        let logical_size = size.to_logical(os_scale as _);
+        let mut logical_size = size.to_logical(os_scale as _);
 
         *self.physical_size.borrow_mut() = physical_size;
-        self.plugin_canvas_window.resized(LogicalSize::new(logical_size.width as _, logical_size.height as _));
+        self.plugin_canvas_window.resized(LogicalSize::new(
+            logical_size.width as _,
+            logical_size.height as _,
+        ));
 
-        let mut logical_size = size.to_logical(os_scale as _);
         logical_size.width /= scale as f32;
         logical_size.height /= scale as f32;
 
-        self.slint_window.dispatch_event(
-            WindowEvent::Resized { size: logical_size },
-        );
+        self.slint_window
+            .dispatch_event(WindowEvent::Resized { size: logical_size });
     }
 
     fn request_redraw(&self) {
         self.pending_draw.store(true, Ordering::Relaxed);
     }
 
-    fn renderer(&self) -> &dyn Renderer {
+    fn renderer(&self) -> &dyn i_slint_core::renderer::Renderer {
         &self.renderer
     }
 
@@ -377,7 +432,9 @@ impl WindowAdapterInternal for PluginCanvasWindowAdapter {
         let input_focus = match request {
             i_slint_core::window::InputMethodRequest::Enable { .. } => true,
             i_slint_core::window::InputMethodRequest::Disable => false,
-            _ => { return; }
+            _ => {
+                return;
+            }
         };
 
         self.plugin_canvas_window.set_input_focus(input_focus);
