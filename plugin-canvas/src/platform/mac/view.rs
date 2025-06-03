@@ -368,6 +368,8 @@ impl OsWindowView {
 
     unsafe extern "C" fn scroll_wheel(&self, _cmd: Sel, event: *const NSEvent) {
         assert!(!event.is_null());
+
+        self.handle_modifier_event(event);
         let x: f64 = unsafe { (*event).deltaX() };
         let y: f64 = unsafe { (*event).deltaY() };
 
