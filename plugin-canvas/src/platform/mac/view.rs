@@ -6,7 +6,7 @@ use std::{
     str::FromStr,
     sync::{
         Weak,
-        atomic::{AtomicPtr, AtomicU8, AtomicUsize, Ordering},
+        atomic::{AtomicPtr, AtomicUsize, Ordering},
     },
 };
 
@@ -19,7 +19,8 @@ use objc2::{
     sel,
 };
 use objc2_app_kit::{
-    NSDragOperation, NSDraggingInfo, NSEvent, NSEventModifierFlags, NSPasteboardTypeFileURL, NSView,
+    NSDragOperation, NSDraggingInfo, NSEvent, NSEventModifierFlags, NSPasteboardTypeFileURL,
+    NSResponder, NSView,
 };
 use objc2_foundation::{NSPoint, NSRect, NSURL};
 use uuid::Uuid;
@@ -40,18 +41,13 @@ pub struct OsWindowView {
 
 struct Context {
     os_window_ptr: AtomicPtr<ThreadBound<OsWindow>>,
-    input_focus: AtomicU8,
     keyboard_modifiers: RefCell<KeyboardModifiers>,
 }
 
 unsafe impl Encode for Context {
     const ENCODING: Encoding = Encoding::Struct(
         "Encode",
-        &[
-            AtomicPtr::<c_void>::ENCODING,
-            AtomicU8::ENCODING,
-            AtomicUsize::ENCODING,
-        ],
+        &[AtomicPtr::<c_void>::ENCODING, AtomicUsize::ENCODING],
     );
 }
 
@@ -76,6 +72,10 @@ impl OsWindowView {
             builder.add_method(
                 sel!(initWithFrame:),
                 Self::init_with_frame as unsafe extern "C" fn(_, _, _) -> _,
+            );
+            builder.add_method(
+                sel!(viewDidMoveToWindow),
+                Self::view_did_move_to_window as unsafe extern "C" fn(_, _),
             );
             builder.add_method(
                 sel!(acceptsFirstMouse:),
@@ -212,13 +212,11 @@ impl OsWindowView {
         f(context)
     }
 
-    pub(crate) fn has_input_focus(&self) -> bool {
-        self.with_context(|context| context.input_focus.load(Ordering::Relaxed) != 0)
-    }
-
     pub(crate) fn set_input_focus(&self, focus: bool) {
-        let focus = if focus { 1 } else { 0 };
-        self.with_context(|context| context.input_focus.store(focus, Ordering::Relaxed));
+        if let Some(window) = self.window() {
+            let responder: Option<&NSResponder> = if focus { Some(self) } else { None };
+            window.makeFirstResponder(responder);
+        }
     }
 
     pub(super) fn send_event(&self, event: Event) -> EventResponse {
@@ -374,6 +372,10 @@ impl OsWindowView {
         unsafe { msg_send![super(self, NSView::class()), initWithFrame: rect] }
     }
 
+    unsafe extern "C" fn view_did_move_to_window(&self, _cmd: Sel) {
+        self.set_input_focus(true);
+    }
+
     unsafe extern "C" fn accepts_first_mouse(&self, _cmd: Sel, _event: *const NSEvent) -> Bool {
         Bool::YES
     }
@@ -394,10 +396,6 @@ impl OsWindowView {
             key_code: key_event_to_keyboard_type_code(code),
             text,
         });
-
-        if !self.has_input_focus() {
-            unsafe { msg_send![super(self, NSView::class()), keyDown: event] }
-        }
     }
 
     unsafe extern "C" fn key_up(&self, _cmd: Sel, event: *const NSEvent) {
@@ -408,10 +406,6 @@ impl OsWindowView {
             key_code: key_event_to_keyboard_type_code(code),
             text,
         });
-
-        if !self.has_input_focus() {
-            unsafe { msg_send![super(self, NSView::class()), keyUp: event] }
-        }
     }
 
     unsafe extern "C" fn flags_changed(&self, _cmd: Sel, event: *const NSEvent) {
