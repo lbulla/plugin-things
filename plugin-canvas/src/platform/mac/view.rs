@@ -1,12 +1,36 @@
-use std::{cell::RefCell, ffi::{c_void, CString}, ops::{Deref, DerefMut}, path::PathBuf, str::FromStr, sync::{atomic::{AtomicPtr, AtomicU8, AtomicUsize, Ordering}, Weak}};
+use std::{
+    cell::RefCell,
+    ffi::{CString, c_void},
+    ops::{Deref, DerefMut},
+    path::PathBuf,
+    str::FromStr,
+    sync::{
+        Weak,
+        atomic::{AtomicPtr, AtomicU8, AtomicUsize, Ordering},
+    },
+};
 
-use objc2::{declare::ClassBuilder, msg_send, runtime::{AnyClass, Bool}, sel, ClassType, Encode, Encoding, Message, RefEncode};
-use objc2::runtime::{Sel, ProtocolObject};
-use objc2_app_kit::{NSDragOperation, NSDraggingInfo, NSEvent, NSEventModifierFlags, NSPasteboardTypeFileURL, NSView};
+use objc2::runtime::{ProtocolObject, Sel};
+use objc2::{
+    ClassType, Encode, Encoding, Message, RefEncode,
+    declare::ClassBuilder,
+    msg_send,
+    runtime::{AnyClass, Bool},
+    sel,
+};
+use objc2_app_kit::{
+    NSDragOperation, NSDraggingInfo, NSEvent, NSEventModifierFlags, NSPasteboardTypeFileURL, NSView,
+};
 use objc2_foundation::{NSPoint, NSRect, NSURL};
 use uuid::Uuid;
 
-use crate::{drag_drop::{DropData, DropOperation}, event::EventResponse, keyboard::KeyboardModifiers, thread_bound::ThreadBound, Event, LogicalPosition, MouseButton};
+use crate::{
+    Event, LogicalPosition, MouseButton,
+    drag_drop::{DropData, DropOperation},
+    event::EventResponse,
+    keyboard::KeyboardModifiers,
+    thread_bound::ThreadBound,
+};
 
 use super::{keyboard::key_event_to_keyboard_type_code, window::OsWindow};
 
@@ -27,7 +51,7 @@ unsafe impl Encode for Context {
             AtomicPtr::<c_void>::ENCODING,
             AtomicU8::ENCODING,
             AtomicUsize::ENCODING,
-        ]
+        ],
     );
 }
 
@@ -41,41 +65,120 @@ impl OsWindowView {
     pub(crate) fn register_class() -> &'static AnyClass {
         let class_name = format!("plugin-canvas-OsWindowView-{}", Uuid::new_v4().simple());
 
-        let mut builder = ClassBuilder::new(&CString::from_str(&class_name).unwrap(), NSView::class())
-            .unwrap_or_else(|| panic!("Class failed to register: {class_name}"));
+        let mut builder =
+            ClassBuilder::new(&CString::from_str(&class_name).unwrap(), NSView::class())
+                .unwrap_or_else(|| panic!("Class failed to register: {class_name}"));
 
         builder.add_ivar::<Context>(c"_context");
 
         unsafe {
             // NSView
-            builder.add_method(sel!(initWithFrame:), Self::init_with_frame as unsafe extern "C" fn(_, _, _) -> _);
-            builder.add_method(sel!(acceptsFirstMouse:), Self::accepts_first_mouse as unsafe extern "C" fn(_, _, _) -> _);
-            builder.add_method(sel!(acceptsFirstResponder), Self::accepts_first_responder as unsafe extern "C" fn(_, _) -> _);
-            builder.add_method(sel!(isFlipped), Self::is_flipped as unsafe extern "C" fn(_, _) -> _);
-            builder.add_method(sel!(keyDown:), Self::key_down as unsafe extern "C" fn(_, _, _) -> _);
-            builder.add_method(sel!(keyUp:), Self::key_up as unsafe extern "C" fn(_, _, _) -> _);
-            builder.add_method(sel!(flagsChanged:), Self::flags_changed as unsafe extern "C" fn(_, _, _) -> _);
-            builder.add_method(sel!(mouseMoved:), Self::mouse_moved as unsafe extern "C" fn(_, _, _) -> _);
-            builder.add_method(sel!(mouseDragged:), Self::mouse_dragged as unsafe extern "C" fn(_, _, _) -> _);
-            builder.add_method(sel!(rightMouseDragged:), Self::right_mouse_dragged as unsafe extern "C" fn(_, _, _) -> _);
-            builder.add_method(sel!(otherMouseDragged:), Self::other_mouse_dragged as unsafe extern "C" fn(_, _, _) -> _);
-            builder.add_method(sel!(mouseDown:), Self::mouse_down as unsafe extern "C" fn(_, _, _) -> _);
-            builder.add_method(sel!(mouseUp:), Self::mouse_up as unsafe extern "C" fn(_, _, _) -> _);
-            builder.add_method(sel!(rightMouseDown:), Self::right_mouse_down as unsafe extern "C" fn(_, _, _) -> _);
-            builder.add_method(sel!(rightMouseUp:), Self::right_mouse_up as unsafe extern "C" fn(_, _, _) -> _);
-            builder.add_method(sel!(otherMouseDown:), Self::other_mouse_down as unsafe extern "C" fn(_, _, _) -> _);
-            builder.add_method(sel!(otherMouseUp:), Self::other_mouse_up as unsafe extern "C" fn(_, _, _) -> _);
-            builder.add_method(sel!(mouseExited:), Self::mouse_exited as unsafe extern "C" fn(_, _, _) -> _);
-            builder.add_method(sel!(scrollWheel:), Self::scroll_wheel as unsafe extern "C" fn(_, _, _) -> _);
-            builder.add_method(sel!(drawRect:), Self::draw_rect as unsafe extern "C" fn(_, _, _) -> _);
+            builder.add_method(
+                sel!(initWithFrame:),
+                Self::init_with_frame as unsafe extern "C" fn(_, _, _) -> _,
+            );
+            builder.add_method(
+                sel!(acceptsFirstMouse:),
+                Self::accepts_first_mouse as unsafe extern "C" fn(_, _, _) -> _,
+            );
+            builder.add_method(
+                sel!(acceptsFirstResponder),
+                Self::accepts_first_responder as unsafe extern "C" fn(_, _) -> _,
+            );
+            builder.add_method(
+                sel!(isFlipped),
+                Self::is_flipped as unsafe extern "C" fn(_, _) -> _,
+            );
+            builder.add_method(
+                sel!(keyDown:),
+                Self::key_down as unsafe extern "C" fn(_, _, _) -> _,
+            );
+            builder.add_method(
+                sel!(keyUp:),
+                Self::key_up as unsafe extern "C" fn(_, _, _) -> _,
+            );
+            builder.add_method(
+                sel!(flagsChanged:),
+                Self::flags_changed as unsafe extern "C" fn(_, _, _) -> _,
+            );
+            builder.add_method(
+                sel!(mouseMoved:),
+                Self::mouse_moved as unsafe extern "C" fn(_, _, _) -> _,
+            );
+            builder.add_method(
+                sel!(mouseDragged:),
+                Self::mouse_dragged as unsafe extern "C" fn(_, _, _) -> _,
+            );
+            builder.add_method(
+                sel!(rightMouseDragged:),
+                Self::right_mouse_dragged as unsafe extern "C" fn(_, _, _) -> _,
+            );
+            builder.add_method(
+                sel!(otherMouseDragged:),
+                Self::other_mouse_dragged as unsafe extern "C" fn(_, _, _) -> _,
+            );
+            builder.add_method(
+                sel!(mouseDown:),
+                Self::mouse_down as unsafe extern "C" fn(_, _, _) -> _,
+            );
+            builder.add_method(
+                sel!(mouseUp:),
+                Self::mouse_up as unsafe extern "C" fn(_, _, _) -> _,
+            );
+            builder.add_method(
+                sel!(rightMouseDown:),
+                Self::right_mouse_down as unsafe extern "C" fn(_, _, _) -> _,
+            );
+            builder.add_method(
+                sel!(rightMouseUp:),
+                Self::right_mouse_up as unsafe extern "C" fn(_, _, _) -> _,
+            );
+            builder.add_method(
+                sel!(otherMouseDown:),
+                Self::other_mouse_down as unsafe extern "C" fn(_, _, _) -> _,
+            );
+            builder.add_method(
+                sel!(otherMouseUp:),
+                Self::other_mouse_up as unsafe extern "C" fn(_, _, _) -> _,
+            );
+            builder.add_method(
+                sel!(mouseExited:),
+                Self::mouse_exited as unsafe extern "C" fn(_, _, _) -> _,
+            );
+            builder.add_method(
+                sel!(scrollWheel:),
+                Self::scroll_wheel as unsafe extern "C" fn(_, _, _) -> _,
+            );
+            builder.add_method(
+                sel!(drawRect:),
+                Self::draw_rect as unsafe extern "C" fn(_, _, _) -> _,
+            );
 
             // NSDraggingDestination
-            builder.add_method(sel!(wantsPeriodicDraggingUpdates), Self::wants_periodic_dragging_updates as unsafe extern "C" fn(_, _) -> _);
-            builder.add_method(sel!(draggingEntered:), Self::dragging_entered as unsafe extern "C" fn(_, _, _) -> _);
-            builder.add_method(sel!(draggingUpdated:), Self::dragging_updated as unsafe extern "C" fn(_, _, _) -> _);
-            builder.add_method(sel!(draggingExited:), Self::dragging_exited as unsafe extern "C" fn(_, _, _) -> _);
-            builder.add_method(sel!(prepareForDragOperation:), Self::prepare_for_drag_operation as unsafe extern "C" fn(_, _, _) -> _);
-            builder.add_method(sel!(performDragOperation:), Self::perform_drag_operation as unsafe extern "C" fn(_, _, _) -> _);
+            builder.add_method(
+                sel!(wantsPeriodicDraggingUpdates),
+                Self::wants_periodic_dragging_updates as unsafe extern "C" fn(_, _) -> _,
+            );
+            builder.add_method(
+                sel!(draggingEntered:),
+                Self::dragging_entered as unsafe extern "C" fn(_, _, _) -> _,
+            );
+            builder.add_method(
+                sel!(draggingUpdated:),
+                Self::dragging_updated as unsafe extern "C" fn(_, _, _) -> _,
+            );
+            builder.add_method(
+                sel!(draggingExited:),
+                Self::dragging_exited as unsafe extern "C" fn(_, _, _) -> _,
+            );
+            builder.add_method(
+                sel!(prepareForDragOperation:),
+                Self::prepare_for_drag_operation as unsafe extern "C" fn(_, _, _) -> _,
+            );
+            builder.add_method(
+                sel!(performDragOperation:),
+                Self::perform_drag_operation as unsafe extern "C" fn(_, _, _) -> _,
+            );
         }
 
         builder.register()
@@ -127,7 +230,7 @@ impl OsWindowView {
 
     fn key_event_text(&self, event: *const NSEvent) -> Option<String> {
         assert!(!event.is_null());
-        
+
         unsafe {
             (*event)
                 .characters()
@@ -140,8 +243,8 @@ impl OsWindowView {
         let mut new_modifiers = KeyboardModifiers::empty();
 
         for (flag, modifier) in [
-            (NSEventModifierFlags::Command, KeyboardModifiers::Meta),
-            (NSEventModifierFlags::Control, KeyboardModifiers::Control),
+            (NSEventModifierFlags::Command, KeyboardModifiers::Control),
+            (NSEventModifierFlags::Control, KeyboardModifiers::Meta),
             (NSEventModifierFlags::Option, KeyboardModifiers::Alt),
             (NSEventModifierFlags::Shift, KeyboardModifiers::Shift),
         ] {
@@ -156,30 +259,28 @@ impl OsWindowView {
                 *modifiers = new_modifiers;
             }
 
-            self.send_event(Event::KeyboardModifiers { modifiers: new_modifiers });
+            self.send_event(Event::KeyboardModifiers {
+                modifiers: new_modifiers,
+            });
         });
     }
-    
+
     fn handle_mouse_move_event(&self, event: *const NSEvent) {
         self.handle_modifier_event(event);
 
-        self.send_event(
-            Event::MouseMoved {
-                position: self.mouse_event_position(event)
-            },
-        );
+        self.send_event(Event::MouseMoved {
+            position: self.mouse_event_position(event),
+        });
     }
 
     fn handle_mouse_button_down_event(&self, event: *const NSEvent) {
         self.handle_modifier_event(event);
 
         if let Some(button) = self.mouse_event_button(event) {
-            self.send_event(
-                Event::MouseButtonDown {
-                    button,
-                    position: self.mouse_event_position(event)
-                },
-            );
+            self.send_event(Event::MouseButtonDown {
+                button,
+                position: self.mouse_event_position(event),
+            });
         };
     }
 
@@ -187,12 +288,10 @@ impl OsWindowView {
         self.handle_modifier_event(event);
 
         if let Some(button) = self.mouse_event_button(event) {
-            self.send_event(
-                Event::MouseButtonUp {
-                    button,
-                    position: self.mouse_event_position(event)
-                },
-            );
+            self.send_event(Event::MouseButtonUp {
+                button,
+                position: self.mouse_event_position(event),
+            });
         };
     }
 
@@ -236,7 +335,8 @@ impl OsWindowView {
             if let Some(items) = pasteboard.pasteboardItems() {
                 for i in 0..items.count() {
                     let item = items.objectAtIndex(i);
-                    if let Some(url) = item.stringForType(NSPasteboardTypeFileURL)
+                    if let Some(url) = item
+                        .stringForType(NSPasteboardTypeFileURL)
                         .and_then(|url| NSURL::URLWithString(&url))
                         .and_then(|url| url.path())
                         .map(|url| PathBuf::from(url.to_string()))
@@ -288,14 +388,12 @@ impl OsWindowView {
 
     unsafe extern "C" fn key_down(&self, _cmd: Sel, event: *const NSEvent) {
         let code = unsafe { (*event).keyCode() };
-        let text = self.key_event_text(event); 
+        let text = self.key_event_text(event);
 
-        self.send_event(
-            Event::KeyDown {
-                key_code: key_event_to_keyboard_type_code(code),
-                text,
-            }
-        );
+        self.send_event(Event::KeyDown {
+            key_code: key_event_to_keyboard_type_code(code),
+            text,
+        });
 
         if !self.has_input_focus() {
             unsafe { msg_send![super(self, NSView::class()), keyDown: event] }
@@ -304,14 +402,12 @@ impl OsWindowView {
 
     unsafe extern "C" fn key_up(&self, _cmd: Sel, event: *const NSEvent) {
         let code = unsafe { (*event).keyCode() };
-        let text = self.key_event_text(event); 
+        let text = self.key_event_text(event);
 
-        self.send_event(
-            Event::KeyUp {
-                key_code: key_event_to_keyboard_type_code(code),
-                text,
-            }
-        );
+        self.send_event(Event::KeyUp {
+            key_code: key_event_to_keyboard_type_code(code),
+            text,
+        });
 
         if !self.has_input_focus() {
             unsafe { msg_send![super(self, NSView::class()), keyUp: event] }
@@ -373,13 +469,11 @@ impl OsWindowView {
         let x: f64 = unsafe { (*event).deltaX() };
         let y: f64 = unsafe { (*event).deltaY() };
 
-        self.send_event(
-            Event::MouseWheel {
-                position: self.mouse_event_position(event),
-                delta_x: x,
-                delta_y: y,
-            }
-        );
+        self.send_event(Event::MouseWheel {
+            position: self.mouse_event_position(event),
+            delta_x: x,
+            delta_y: y,
+        });
     }
 
     unsafe extern "C" fn draw_rect(&self, _cmd: Sel, _rect: NSRect) {
@@ -391,7 +485,11 @@ impl OsWindowView {
         Bool::NO
     }
 
-    unsafe extern "C" fn dragging_entered(&self, _cmd: Sel, sender: &ProtocolObject<dyn NSDraggingInfo>) -> NSDragOperation {
+    unsafe extern "C" fn dragging_entered(
+        &self,
+        _cmd: Sel,
+        sender: &ProtocolObject<dyn NSDraggingInfo>,
+    ) -> NSDragOperation {
         let response = self.send_event(Event::DragEntered {
             position: self.drag_event_position(sender),
             data: self.drag_event_data(sender),
@@ -400,7 +498,11 @@ impl OsWindowView {
         self.convert_drag_operation(response)
     }
 
-    unsafe extern "C" fn dragging_updated(&self, _cmd: Sel, sender: &ProtocolObject<dyn NSDraggingInfo>) -> NSDragOperation {
+    unsafe extern "C" fn dragging_updated(
+        &self,
+        _cmd: Sel,
+        sender: &ProtocolObject<dyn NSDraggingInfo>,
+    ) -> NSDragOperation {
         let response = self.send_event(Event::DragMoved {
             position: self.drag_event_position(sender),
             data: self.drag_event_data(sender),
@@ -409,15 +511,27 @@ impl OsWindowView {
         self.convert_drag_operation(response)
     }
 
-    unsafe extern "C" fn dragging_exited(&self, _cmd: Sel, _sender: &ProtocolObject<dyn NSDraggingInfo>) {
+    unsafe extern "C" fn dragging_exited(
+        &self,
+        _cmd: Sel,
+        _sender: &ProtocolObject<dyn NSDraggingInfo>,
+    ) {
         self.send_event(Event::DragExited);
     }
 
-    unsafe extern "C" fn prepare_for_drag_operation(&self, _cmd: Sel, _sender: &ProtocolObject<dyn NSDraggingInfo>) -> Bool {
+    unsafe extern "C" fn prepare_for_drag_operation(
+        &self,
+        _cmd: Sel,
+        _sender: &ProtocolObject<dyn NSDraggingInfo>,
+    ) -> Bool {
         Bool::YES
     }
 
-    unsafe extern "C" fn perform_drag_operation(&self, _cmd: Sel, sender: &ProtocolObject<dyn NSDraggingInfo>) -> Bool {
+    unsafe extern "C" fn perform_drag_operation(
+        &self,
+        _cmd: Sel,
+        sender: &ProtocolObject<dyn NSDraggingInfo>,
+    ) -> Bool {
         let response = self.send_event(Event::DragDropped {
             position: self.drag_event_position(sender),
             data: self.drag_event_data(sender),
