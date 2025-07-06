@@ -52,7 +52,7 @@ impl SlintEditor {
         .unwrap();
 
         // It's ok if this fails as it just means it has already been set
-        slint::platform::set_platform(Box::new(PluginCanvasPlatform)).ok();
+        slint::platform::set_platform(Box::new(PluginCanvasPlatform::default())).ok();
 
         let window = Arc::new(window);
         WINDOW_TO_SLINT.set(Some(window.clone()));
