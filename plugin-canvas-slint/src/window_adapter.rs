@@ -390,10 +390,6 @@ impl WindowAdapter for PluginCanvasWindowAdapter {
         &self.slint_window
     }
 
-    fn size(&self) -> slint::PhysicalSize {
-        *self.physical_size.borrow()
-    }
-
     fn set_size(&self, size: slint::WindowSize) {
         let scale = self.scale.load(Ordering::Acquire);
         let os_scale = self.plugin_canvas_window.os_scale();
@@ -414,6 +410,10 @@ impl WindowAdapter for PluginCanvasWindowAdapter {
             .dispatch_event(WindowEvent::Resized { size: logical_size });
     }
 
+    fn size(&self) -> slint::PhysicalSize {
+        *self.physical_size.borrow()
+    }
+
     fn request_redraw(&self) {
         self.pending_draw.store(true, Ordering::Relaxed);
     }
@@ -428,18 +428,6 @@ impl WindowAdapter for PluginCanvasWindowAdapter {
 }
 
 impl WindowAdapterInternal for PluginCanvasWindowAdapter {
-    fn input_method_request(&self, request: i_slint_core::window::InputMethodRequest) {
-        let input_focus = match request {
-            i_slint_core::window::InputMethodRequest::Enable { .. } => true,
-            i_slint_core::window::InputMethodRequest::Disable => false,
-            _ => {
-                return;
-            }
-        };
-
-        self.plugin_canvas_window.set_input_focus(input_focus);
-    }
-
     fn set_mouse_cursor(&self, cursor: i_slint_core::items::MouseCursor) {
         let cursor = match cursor {
             i_slint_core::items::MouseCursor::Default => Some(CursorIcon::Default),
@@ -474,5 +462,17 @@ impl WindowAdapterInternal for PluginCanvasWindowAdapter {
         };
 
         self.plugin_canvas_window.set_cursor(cursor);
+    }
+
+    fn input_method_request(&self, request: i_slint_core::window::InputMethodRequest) {
+        let input_focus = match request {
+            i_slint_core::window::InputMethodRequest::Enable { .. } => true,
+            i_slint_core::window::InputMethodRequest::Disable => false,
+            _ => {
+                return;
+            }
+        };
+
+        self.plugin_canvas_window.set_input_focus(input_focus);
     }
 }
