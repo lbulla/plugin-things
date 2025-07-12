@@ -11,7 +11,7 @@ use web_sys::{HtmlCanvasElement, Window, window};
 
 use crate::drag_drop::{DropData, DropOperation};
 use crate::error::Error;
-use crate::event::{EventCallback, EventResponse};
+use crate::event::{EventCallback, EventResponse, ScrollDelta};
 use crate::keyboard::KeyboardModifiers;
 use crate::platform::interface::{HtmlCanvasInterface, OsWindowInterface};
 use crate::platform::os_window_handle::OsWindowHandle;
@@ -257,13 +257,19 @@ impl OsWindowInterface for OsWindow {
                 let inner = inner.clone();
                 move |web_event: web_sys::WheelEvent| {
                     update_modifiers!(inner, web_event);
+
+                    let delta = if web_event.delta_mode() == web_sys::WheelEvent::DOM_DELTA_PIXEL {
+                        ScrollDelta::PixelDelta(web_event.delta_x(), web_event.delta_y())
+                    } else {
+                        // TODO: Handle `DOM_DELTA_PAGE`.
+                        ScrollDelta::LineDelta(web_event.delta_x(), web_event.delta_y())
+                    };
                     send_event!(
                         inner,
                         web_event,
                         Event::MouseWheel {
                             position: event_position!(inner, web_event),
-                            delta_x: web_event.delta_x(),
-                            delta_y: web_event.delta_y(),
+                            delta,
                         }
                     );
                 }

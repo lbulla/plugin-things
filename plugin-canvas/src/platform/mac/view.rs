@@ -25,15 +25,14 @@ use objc2_app_kit::{
 use objc2_foundation::{NSPoint, NSRect, NSURL};
 use uuid::Uuid;
 
+use super::{keyboard::key_event_to_keyboard_type_code, window::OsWindow};
 use crate::{
     Event, LogicalPosition, MouseButton,
     drag_drop::{DropData, DropOperation},
-    event::EventResponse,
+    event::{EventResponse, ScrollDelta},
     keyboard::KeyboardModifiers,
     thread_bound::ThreadBound,
 };
-
-use super::{keyboard::key_event_to_keyboard_type_code, window::OsWindow};
 
 pub struct OsWindowView {
     superclass: NSView,
@@ -460,13 +459,20 @@ impl OsWindowView {
         assert!(!event.is_null());
 
         self.handle_modifier_event(event);
-        let x: f64 = unsafe { (*event).deltaX() };
-        let y: f64 = unsafe { (*event).deltaY() };
+
+        let delta = unsafe {
+            let delta_x = (*event).scrollingDeltaX();
+            let delta_y = (*event).scrollingDeltaY();
+            if (*event).hasPreciseScrollingDeltas() {
+                ScrollDelta::PixelDelta(delta_x, delta_y)
+            } else {
+                ScrollDelta::LineDelta(delta_x, delta_y)
+            }
+        };
 
         self.send_event(Event::MouseWheel {
             position: self.mouse_event_position(event),
-            delta_x: x,
-            delta_y: y,
+            delta,
         });
     }
 

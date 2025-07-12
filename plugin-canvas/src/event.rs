@@ -1,10 +1,20 @@
-use crate::{dimensions::LogicalPosition, drag_drop::{DropData, DropOperation}, keyboard::KeyboardModifiers};
+use crate::{
+    dimensions::LogicalPosition,
+    drag_drop::{DropData, DropOperation},
+    keyboard::KeyboardModifiers,
+};
 
 #[derive(Clone, Copy, Debug)]
 pub enum MouseButton {
     Left,
     Right,
     Middle,
+}
+
+#[derive(Clone, Debug)]
+pub enum ScrollDelta {
+    LineDelta(f64, f64),
+    PixelDelta(f64, f64),
 }
 
 #[derive(Clone, Debug)]
@@ -43,8 +53,7 @@ pub enum Event {
 
     MouseWheel {
         position: LogicalPosition,
-        delta_x: f64,
-        delta_y: f64,
+        delta: ScrollDelta,
     },
 
     DragEntered {

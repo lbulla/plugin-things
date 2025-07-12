@@ -22,6 +22,7 @@ use i_slint_renderer_skia::SkiaRenderer as Renderer;
 use i_slint_renderer_skia::SkiaSharedContext;
 #[cfg(target_arch = "wasm32")]
 use plugin_canvas::HtmlCanvasInterface;
+use plugin_canvas::event::ScrollDelta;
 
 use crate::view::PluginView;
 
@@ -297,17 +298,18 @@ impl PluginCanvasWindowAdapter {
                 EventResponse::Handled
             }
 
-            plugin_canvas::Event::MouseWheel {
-                position,
-                delta_x,
-                delta_y,
-            } => {
+            plugin_canvas::Event::MouseWheel { position, delta } => {
                 let position = self.convert_logical_position(position);
+                let (delta_x, delta_y) = match delta {
+                    ScrollDelta::LineDelta(x, y) => (*x as f32 * 60.0, *y as f32 * 60.0),
+                    ScrollDelta::PixelDelta(x, y) => (*x as f32, *y as f32),
+                };
+
                 self.slint_window
                     .dispatch_event(WindowEvent::PointerScrolled {
                         position,
-                        delta_x: *delta_x as f32,
-                        delta_y: *delta_y as f32,
+                        delta_x,
+                        delta_y,
                     });
                 EventResponse::Handled
             }

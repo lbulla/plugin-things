@@ -1,17 +1,40 @@
 use std::sync::Arc;
-use std::{cell::RefCell, ffi::OsStr, num::NonZeroU32, ptr::NonNull, sync::atomic::{AtomicBool, Ordering}};
+use std::{
+    cell::RefCell,
+    ffi::OsStr,
+    num::NonZeroU32,
+    ptr::NonNull,
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 use cursor_icon::CursorIcon;
 use keyboard_types::Code;
-use raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle, XcbDisplayHandle, XcbWindowHandle};
+use raw_window_handle::{
+    HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle, XcbDisplayHandle,
+    XcbWindowHandle,
+};
 use sys_locale::get_locales;
-use x11rb::{COPY_DEPTH_FROM_PARENT, COPY_FROM_PARENT};
 use x11rb::connection::Connection;
-use x11rb::protocol::{xfixes::{hide_cursor, show_cursor}, xproto::{change_window_attributes, ChangeWindowAttributesAux, ConfigureWindowAux, ConnectionExt, CreateWindowAux, EventMask, KeyButMask, WindowClass}};
+use x11rb::protocol::{
+    xfixes::{hide_cursor, show_cursor},
+    xproto::{
+        ChangeWindowAttributesAux, ConfigureWindowAux, ConnectionExt, CreateWindowAux, EventMask,
+        KeyButMask, WindowClass, change_window_attributes,
+    },
+};
 use x11rb::xcb_ffi::XCBConnection;
+use x11rb::{COPY_DEPTH_FROM_PARENT, COPY_FROM_PARENT};
 use xkbcommon::xkb;
 
-use crate::{dimensions::Size, error::Error, event::{EventCallback, EventResponse}, keyboard::KeyboardModifiers, platform::{interface::OsWindowInterface, os_window_handle::OsWindowHandle}, window::WindowAttributes, Event, MouseButton, PhysicalPosition};
+use crate::{
+    Event, MouseButton, PhysicalPosition,
+    dimensions::Size,
+    error::Error,
+    event::{EventCallback, EventResponse, ScrollDelta},
+    keyboard::KeyboardModifiers,
+    platform::{interface::OsWindowInterface, os_window_handle::OsWindowHandle},
+    window::WindowAttributes,
+};
 
 use super::{cursors::Cursors, keyboard::x11_to_keyboard_types_code};
 
@@ -45,25 +68,19 @@ impl OsWindow {
                 let position = PhysicalPosition {
                     x: event.event_x as i32,
                     y: event.event_y as i32,
-                }.to_logical(self.window_attributes.scale);
+                }
+                .to_logical(self.window_attributes.scale);
 
                 if let Some(button) = Self::mouse_button_from_detail(event.detail) {
-                    self.send_event(Event::MouseButtonDown {
-                        button,
-                        position,
-                    });    
+                    self.send_event(Event::MouseButtonDown { button, position });
                 } else if [4, 5].contains(&event.detail) {
-                    let delta_y = if event.detail == 4 {
-                        -1.0
+                    let delta = if event.detail == 4 {
+                        ScrollDelta::LineDelta(0.0, -1.0)
                     } else {
-                        1.0
+                        ScrollDelta::LineDelta(0.0, 1.0)
                     };
 
-                    self.send_event(Event::MouseWheel {
-                        position,
-                        delta_x: 0.0,
-                        delta_y,
-                    });
+                    self.send_event(Event::MouseWheel { position, delta });
                 }
             }
 
@@ -73,13 +90,11 @@ impl OsWindow {
                 let position = PhysicalPosition {
                     x: event.event_x as i32,
                     y: event.event_y as i32,
-                }.to_logical(self.window_attributes.scale);
+                }
+                .to_logical(self.window_attributes.scale);
 
                 if let Some(button) = Self::mouse_button_from_detail(event.detail) {
-                    self.send_event(Event::MouseButtonUp {
-                        button,
-                        position,
-                    });    
+                    self.send_event(Event::MouseButtonUp { button, position });
                 }
             }
 
@@ -98,7 +113,9 @@ impl OsWindow {
                 for keysym in xkb_state.key_get_syms(x11_keycode) {
                     xkb_compose_state.feed(*keysym);
 
-                    if xkb_compose_state.status() == xkb::Status::Composed && let Some(text) = xkb_compose_state.utf8() {
+                    if xkb_compose_state.status() == xkb::Status::Composed
+                        && let Some(text) = xkb_compose_state.utf8()
+                    {
                         self.send_event(Event::KeyDown {
                             key_code: keycode,
                             text: Some(text),
@@ -132,7 +149,7 @@ impl OsWindow {
 
                 let text = xkb_state.key_get_utf8(x11_keycode);
                 xkb_state.update_key(x11_keycode, xkb::KeyDirection::Up);
-                
+
                 self.send_event(Event::KeyUp {
                     key_code: keycode,
                     text: Some(text),
@@ -149,12 +166,13 @@ impl OsWindow {
                 let position = PhysicalPosition {
                     x: event.event_x as i32,
                     y: event.event_y as i32,
-                }.to_logical(self.window_attributes.scale);
+                }
+                .to_logical(self.window_attributes.scale);
 
                 self.send_event(Event::MouseMoved { position });
             }
-            
-            _ => {},
+
+            _ => {}
         }
 
         Ok(())
@@ -174,17 +192,27 @@ impl OsWindow {
         let mut new_modifiers = *modifiers;
 
         match keycode {
-            Code::AltLeft | Code::AltRight => { new_modifiers.set(KeyboardModifiers::Alt, down); }
-            Code::ControlLeft | Code::ControlRight => { new_modifiers.set(KeyboardModifiers::Control, down); }
-            Code::MetaLeft | Code::MetaRight => { new_modifiers.set(KeyboardModifiers::Meta, down); }
-            Code::ShiftLeft | Code::ShiftRight => { new_modifiers.set(KeyboardModifiers::Shift, down); }
+            Code::AltLeft | Code::AltRight => {
+                new_modifiers.set(KeyboardModifiers::Alt, down);
+            }
+            Code::ControlLeft | Code::ControlRight => {
+                new_modifiers.set(KeyboardModifiers::Control, down);
+            }
+            Code::MetaLeft | Code::MetaRight => {
+                new_modifiers.set(KeyboardModifiers::Meta, down);
+            }
+            Code::ShiftLeft | Code::ShiftRight => {
+                new_modifiers.set(KeyboardModifiers::Shift, down);
+            }
             _ => {}
         }
 
         if new_modifiers != *modifiers {
             *modifiers = new_modifiers;
 
-            self.send_event(Event::KeyboardModifiers { modifiers: new_modifiers });
+            self.send_event(Event::KeyboardModifiers {
+                modifiers: new_modifiers,
+            });
         }
     }
 
@@ -193,13 +221,18 @@ impl OsWindow {
         let mut new_modifiers = *modifiers;
 
         new_modifiers.set(KeyboardModifiers::Alt, mask.contains(KeyButMask::MOD1));
-        new_modifiers.set(KeyboardModifiers::Control, mask.contains(KeyButMask::CONTROL));
+        new_modifiers.set(
+            KeyboardModifiers::Control,
+            mask.contains(KeyButMask::CONTROL),
+        );
         new_modifiers.set(KeyboardModifiers::Shift, mask.contains(KeyButMask::SHIFT));
 
         if new_modifiers != *modifiers {
             *modifiers = new_modifiers;
 
-            self.send_event(Event::KeyboardModifiers { modifiers: new_modifiers });
+            self.send_event(Event::KeyboardModifiers {
+                modifiers: new_modifiers,
+            });
         }
     }
 
@@ -220,15 +253,20 @@ impl OsWindow {
         locales.push("C".into());
 
         let mut xkb_compose_state = None;
-        
+
         for locale in locales.iter() {
-            if let Ok(compose_table) = xkb::compose::Table::new_from_locale(&xkb_context, OsStr::new(&locale), 0) {
+            if let Ok(compose_table) =
+                xkb::compose::Table::new_from_locale(&xkb_context, OsStr::new(&locale), 0)
+            {
                 xkb_compose_state = Some(xkb::compose::State::new(&compose_table, 0));
                 break;
             }
         }
 
-        assert!(xkb_compose_state.is_some(), "Couldn't find keyboard compose table for any of the locales: {locales:?}");
+        assert!(
+            xkb_compose_state.is_some(),
+            "Couldn't find keyboard compose table for any of the locales: {locales:?}"
+        );
 
         (xkb_state, xkb_compose_state.unwrap())
     }
@@ -239,12 +277,13 @@ impl OsWindowInterface for OsWindow {
         parent_window_handle: RawWindowHandle,
         window_attributes: WindowAttributes,
         event_callback: Box<EventCallback>,
-    ) -> Result<OsWindowHandle, Error>
-    {
+    ) -> Result<OsWindowHandle, Error> {
         let parent_window_id = match parent_window_handle {
             RawWindowHandle::Xlib(parent_window_handle) => parent_window_handle.window as u32,
             RawWindowHandle::Xcb(parent_window_handle) => parent_window_handle.window.get(),
-            _ => { return Err(Error::PlatformError("Not an X11 window".into())); }
+            _ => {
+                return Err(Error::PlatformError("Not an X11 window".into()));
+            }
         };
 
         let size = Size::with_logical_size(window_attributes.size, window_attributes.scale);
@@ -263,15 +302,14 @@ impl OsWindowInterface for OsWindow {
             0,
             WindowClass::INPUT_OUTPUT,
             COPY_FROM_PARENT,
-            &CreateWindowAux::new()
-                .event_mask(
-                    EventMask::BUTTON_PRESS | 
-                    EventMask::BUTTON_RELEASE |
-                    EventMask::KEY_PRESS | 
-                    EventMask::KEY_RELEASE | 
-                    EventMask::LEAVE_WINDOW | 
-                    EventMask::POINTER_MOTION
-                ),
+            &CreateWindowAux::new().event_mask(
+                EventMask::BUTTON_PRESS
+                    | EventMask::BUTTON_RELEASE
+                    | EventMask::KEY_PRESS
+                    | EventMask::KEY_RELEASE
+                    | EventMask::LEAVE_WINDOW
+                    | EventMask::POINTER_MOTION,
+            ),
         )?;
 
         connection.map_window(window_id)?;
@@ -279,7 +317,10 @@ impl OsWindowInterface for OsWindow {
 
         let (xkb_state, xkb_compose_state) = Self::init_xkb(&connection);
 
-        let display_handle = XcbDisplayHandle::new(Some(NonNull::new(connection.get_raw_xcb_connection()).unwrap()), screen as _);
+        let display_handle = XcbDisplayHandle::new(
+            Some(NonNull::new(connection.get_raw_xcb_connection()).unwrap()),
+            screen as _,
+        );
         let window_handle = XcbWindowHandle::new(NonZeroU32::new(window_id as _).unwrap());
 
         let cursors = Cursors::new(&connection, screen as _);
@@ -309,12 +350,14 @@ impl OsWindowInterface for OsWindow {
     }
 
     fn resized(&self, size: crate::LogicalSize) {
-        self.connection.configure_window(
-            self.window_handle.window.into(),
-            &ConfigureWindowAux::new()
-                .width(size.width as u32)
-                .height(size.height as u32),
-        ).unwrap();
+        self.connection
+            .configure_window(
+                self.window_handle.window.into(),
+                &ConfigureWindowAux::new()
+                    .width(size.width as u32)
+                    .height(size.height as u32),
+            )
+            .unwrap();
     }
 
     fn set_cursor(&self, cursor: Option<cursor_icon::CursorIcon>) {
@@ -367,8 +410,9 @@ impl OsWindowInterface for OsWindow {
                 &ChangeWindowAttributesAux {
                     cursor: Some(cursor),
                     ..Default::default()
-                }
-            ).unwrap();
+                },
+            )
+            .unwrap();
 
             self.connection.flush().unwrap();
         } else {
@@ -380,8 +424,7 @@ impl OsWindowInterface for OsWindow {
         }
     }
 
-    fn set_input_focus(&self, _focus: bool) {
-    }
+    fn set_input_focus(&self, _focus: bool) {}
 
     fn warp_mouse(&self, _position: crate::LogicalPosition) {
         // TODO
@@ -397,14 +440,18 @@ impl OsWindowInterface for OsWindow {
 }
 
 impl HasDisplayHandle for OsWindow {
-    fn display_handle(&self) -> Result<raw_window_handle::DisplayHandle<'_>, raw_window_handle::HandleError> {
+    fn display_handle(
+        &self,
+    ) -> Result<raw_window_handle::DisplayHandle<'_>, raw_window_handle::HandleError> {
         let raw_display_handle = RawDisplayHandle::Xcb(self.display_handle);
         Ok(unsafe { raw_window_handle::DisplayHandle::borrow_raw(raw_display_handle) })
     }
 }
 
 impl HasWindowHandle for OsWindow {
-    fn window_handle(&self) -> Result<raw_window_handle::WindowHandle<'_>, raw_window_handle::HandleError> {
+    fn window_handle(
+        &self,
+    ) -> Result<raw_window_handle::WindowHandle<'_>, raw_window_handle::HandleError> {
         let raw_window_handle = RawWindowHandle::Xcb(self.window_handle);
         Ok(unsafe { raw_window_handle::WindowHandle::borrow_raw(raw_window_handle) })
     }
