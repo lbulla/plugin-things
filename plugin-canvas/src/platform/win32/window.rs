@@ -1,18 +1,67 @@
-use std::{cell::RefCell, ffi::OsString, mem::{size_of, transmute}, num::NonZeroIsize, os::windows::prelude::OsStringExt, ptr::{null, null_mut}, rc::{Rc, Weak}, sync::{atomic::{AtomicBool, AtomicUsize, Ordering}, Arc}, time::Duration};
+use std::{
+    cell::RefCell,
+    ffi::OsString,
+    mem::{size_of, transmute},
+    num::NonZeroIsize,
+    os::windows::prelude::OsStringExt,
+    ptr::{null, null_mut},
+    rc::{Rc, Weak},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+    },
+    time::Duration,
+};
 
 use cursor_icon::CursorIcon;
 use keyboard_types::Code;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawWindowHandle, Win32WindowHandle};
 use uuid::Uuid;
-use windows::{core::PCWSTR, Win32::UI::Input::KeyboardAndMouse::{VK_LWIN, VK_RWIN}};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
-use windows::Win32::Graphics::{Dwm::{DwmFlush, DwmIsCompositionEnabled}, Dxgi::{CreateDXGIFactory, IDXGIFactory, IDXGIOutput}, Gdi::{ClientToScreen, MonitorFromWindow, ScreenToClient, HBRUSH, MONITOR_DEFAULTTOPRIMARY}};
-use windows::Win32::System::{Ole::{IDropTarget, OleInitialize, RegisterDragDrop, RevokeDragDrop}, Threading::GetCurrentThreadId};
-use windows::Win32::UI::{Controls::WM_MOUSELEAVE, Input::KeyboardAndMouse::{GetAsyncKeyState, SetCapture, TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT, VK_CONTROL, VK_MENU, VK_SHIFT}, WindowsAndMessaging::{CallNextHookEx, CreateWindowExW, DefWindowProcW, DestroyWindow, GetWindowLongPtrW, LoadCursorW, MoveWindow, PostMessageW, RegisterClassW, SendMessageW, SetCursor, SetCursorPos, SetWindowLongPtrW, SetWindowsHookExW, ShowCursor, UnhookWindowsHookEx, UnregisterClassW, CS_OWNDC, GWLP_USERDATA, HHOOK, HICON, IDC_ARROW, MOUSEHOOKSTRUCTEX, WH_MOUSE, WINDOW_EX_STYLE, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_MOVE, WM_RBUTTONDOWN, WM_RBUTTONUP, WNDCLASSW, WS_CHILD, WS_VISIBLE}};
+use windows::Win32::Graphics::{
+    Dwm::{DwmFlush, DwmIsCompositionEnabled},
+    Dxgi::{CreateDXGIFactory, IDXGIFactory, IDXGIOutput},
+    Gdi::{ClientToScreen, HBRUSH, MONITOR_DEFAULTTOPRIMARY, MonitorFromWindow, ScreenToClient},
+};
+use windows::Win32::System::{
+    Ole::{IDropTarget, OleInitialize, RegisterDragDrop, RevokeDragDrop},
+    Threading::GetCurrentThreadId,
+};
+use windows::Win32::UI::{
+    Controls::WM_MOUSELEAVE,
+    Input::KeyboardAndMouse::{
+        GetAsyncKeyState, SetCapture, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent, VK_CONTROL,
+        VK_MENU, VK_SHIFT,
+    },
+    WindowsAndMessaging::{
+        CS_OWNDC, CallNextHookEx, CreateWindowExW, DefWindowProcW, DestroyWindow, GWLP_USERDATA,
+        GetWindowLongPtrW, HHOOK, HICON, IDC_ARROW, LoadCursorW, MOUSEHOOKSTRUCTEX, MoveWindow,
+        PostMessageW, RegisterClassW, SendMessageW, SetCursor, SetCursorPos, SetWindowLongPtrW,
+        SetWindowsHookExW, ShowCursor, UnhookWindowsHookEx, UnregisterClassW, WH_MOUSE,
+        WINDOW_EX_STYLE, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE,
+        WM_MOUSEWHEEL, WM_MOVE, WM_RBUTTONDOWN, WM_RBUTTONUP, WNDCLASSW, WS_CHILD, WS_VISIBLE,
+    },
+};
+use windows::{
+    Win32::UI::Input::KeyboardAndMouse::{VK_LWIN, VK_RWIN},
+    core::PCWSTR,
+};
 
-use crate::{dimensions::Size, error::Error, event::{Event, EventCallback, EventResponse, MouseButton}, keyboard::KeyboardModifiers, platform::{interface::OsWindowInterface, os_window_handle::OsWindowHandle}, window::WindowAttributes, LogicalPosition, LogicalSize, PhysicalPosition};
-
-use super::{cursors::Cursors, drop_target::DropTarget, message_window::MessageWindow, to_wstr, version::is_windows10_or_greater, PLUGIN_HINSTANCE, WM_USER_CHAR, WM_USER_FRAME_TIMER, WM_USER_KEY_DOWN, WM_USER_KEY_UP};
+use super::{
+    PLUGIN_HINSTANCE, WM_USER_CHAR, WM_USER_FRAME_TIMER, WM_USER_KEY_DOWN, WM_USER_KEY_UP,
+    cursors::Cursors, drop_target::DropTarget, message_window::MessageWindow, to_wstr,
+    version::is_windows10_or_greater,
+};
+use crate::event::ScrollDelta;
+use crate::{
+    LogicalPosition, LogicalSize, PhysicalPosition,
+    dimensions::Size,
+    error::Error,
+    event::{Event, EventCallback, EventResponse, MouseButton},
+    keyboard::KeyboardModifiers,
+    platform::{interface::OsWindowInterface, os_window_handle::OsWindowHandle},
+    window::WindowAttributes,
+};
 
 pub struct OsWindow {
     window_class: u16,
@@ -21,7 +70,7 @@ pub struct OsWindow {
     event_callback: Box<EventCallback>,
     drop_target: RefCell<Option<Box<IDropTarget>>>,
     message_window: Arc<MessageWindow>,
-    
+
     cursors: Cursors,
     buttons_down: AtomicUsize,
 
@@ -35,14 +84,16 @@ impl OsWindow {
     pub(super) fn send_event(&self, event: Event) -> EventResponse {
         (self.event_callback)(event)
     }
-    
+
     pub(super) fn hwnd(&self) -> HWND {
         HWND(self.window_handle.hwnd.get() as _)
     }
 
     fn button_down(&self, button: MouseButton, position: LogicalPosition) {
         if self.buttons_down.fetch_add(1, Ordering::Relaxed) == 0 {
-            unsafe { SetCapture(self.hwnd()); }
+            unsafe {
+                SetCapture(self.hwnd());
+            }
         }
 
         self.send_event(Event::MouseButtonDown { button, position });
@@ -50,10 +101,12 @@ impl OsWindow {
 
     fn button_up(&self, button: MouseButton, position: LogicalPosition) {
         if self.buttons_down.fetch_sub(1, Ordering::Relaxed) == 1 {
-            unsafe { SetCapture(HWND(null_mut())); }
+            unsafe {
+                SetCapture(HWND(null_mut()));
+            }
         }
 
-        self.send_event(Event::MouseButtonUp { button, position });    
+        self.send_event(Event::MouseButtonUp { button, position });
     }
 
     fn logical_mouse_position(&self, lparam: LPARAM) -> LogicalPosition {
@@ -62,7 +115,8 @@ impl OsWindow {
         PhysicalPosition {
             x: (lparam.0 & 0xFFFF) as i16 as i32,
             y: ((lparam.0 >> 16) & 0xFFFF) as i16 as i32,
-        }.to_logical(scale)
+        }
+        .to_logical(scale)
     }
 
     fn update_modifiers(&self) {
@@ -82,7 +136,9 @@ impl OsWindow {
         let mut modifiers = self.keyboard_modifiers.borrow_mut();
         if new_modifiers != *modifiers {
             *modifiers = new_modifiers;
-            self.send_event(Event::KeyboardModifiers { modifiers: new_modifiers });
+            self.send_event(Event::KeyboardModifiers {
+                modifiers: new_modifiers,
+            });
         }
     }
 }
@@ -97,7 +153,8 @@ impl OsWindowInterface for OsWindow {
             return Err(Error::PlatformError("Not a win32 window".into()));
         };
 
-        let class_name = to_wstr("plugin-canvas-".to_string() + &Uuid::new_v4().simple().to_string());
+        let class_name =
+            to_wstr("plugin-canvas-".to_string() + &Uuid::new_v4().simple().to_string());
         let size = Size::with_logical_size(window_attributes.size, window_attributes.scale);
 
         let cursor = unsafe { LoadCursorW(None, IDC_ARROW).unwrap() };
@@ -117,23 +174,28 @@ impl OsWindowInterface for OsWindow {
 
         let window_class = unsafe { RegisterClassW(&window_class_attributes) };
         if window_class == 0 {
-            return Err(Error::PlatformError("Failed to register window class".into()));
+            return Err(Error::PlatformError(
+                "Failed to register window class".into(),
+            ));
         }
 
-        let hwnd = unsafe { CreateWindowExW(
-            WINDOW_EX_STYLE(0),
-            PCWSTR(window_class as _),
-            PCWSTR(null()),
-            WS_CHILD | WS_VISIBLE,
-            0,
-            0,
-            size.physical_size().width as i32,
-            size.physical_size().height as i32,
-            Some(HWND(parent_window_handle.hwnd.get() as _)),
-            None,
-            Some(PLUGIN_HINSTANCE.with(|hinstance| *hinstance)),
-            None,
-        ).unwrap() };
+        let hwnd = unsafe {
+            CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                PCWSTR(window_class as _),
+                PCWSTR(null()),
+                WS_CHILD | WS_VISIBLE,
+                0,
+                0,
+                size.physical_size().width as i32,
+                size.physical_size().height as i32,
+                Some(HWND(parent_window_handle.hwnd.get() as _)),
+                None,
+                Some(PLUGIN_HINSTANCE.with(|hinstance| *hinstance)),
+                None,
+            )
+            .unwrap()
+        };
 
         let mut tracking_info = TRACKMOUSEEVENT {
             cbSize: size_of::<TRACKMOUSEEVENT>() as u32,
@@ -149,12 +211,7 @@ impl OsWindowInterface for OsWindow {
         let moved: Arc<AtomicBool> = Arc::new(false.into());
 
         let hook_handle = unsafe {
-            SetWindowsHookExW(
-                WH_MOUSE,
-                Some(hook_proc),
-                None,
-                GetCurrentThreadId(),
-            ).unwrap()
+            SetWindowsHookExW(WH_MOUSE, Some(hook_proc), None, GetCurrentThreadId()).unwrap()
         };
 
         std::thread::spawn({
@@ -191,7 +248,8 @@ impl OsWindowInterface for OsWindow {
             keyboard_modifiers: Default::default(),
         });
 
-        let drop_target: Box<IDropTarget> = Box::new(DropTarget::new(Rc::downgrade(&window)).into());
+        let drop_target: Box<IDropTarget> =
+            Box::new(DropTarget::new(Rc::downgrade(&window)).into());
 
         unsafe {
             OleInitialize(None)?;
@@ -210,7 +268,9 @@ impl OsWindowInterface for OsWindow {
     }
 
     fn resized(&self, size: LogicalSize) {
-        unsafe { MoveWindow(self.hwnd(), 0, 0, size.width as _, size.height as _, true).unwrap(); }
+        unsafe {
+            MoveWindow(self.hwnd(), 0, 0, size.width as _, size.height as _, true).unwrap();
+        }
     }
 
     fn set_cursor(&self, cursor: Option<CursorIcon>) {
@@ -226,8 +286,8 @@ impl OsWindowInterface for OsWindow {
                 CursorIcon::Crosshair => self.cursors.cross,
                 CursorIcon::Text => self.cursors.ibeam,
                 CursorIcon::VerticalText => self.cursors.arrow, // TODO
-                CursorIcon::Alias => self.cursors.arrow, // TODO
-                CursorIcon::Copy => self.cursors.arrow, // TODO
+                CursorIcon::Alias => self.cursors.arrow,        // TODO
+                CursorIcon::Copy => self.cursors.arrow,         // TODO
                 CursorIcon::Move => self.cursors.size_all,
                 CursorIcon::NoDrop => self.cursors.no,
                 CursorIcon::NotAllowed => self.cursors.no,
@@ -252,13 +312,15 @@ impl OsWindowInterface for OsWindow {
                 CursorIcon::ZoomOut => self.cursors.size_all, // TODO
                 _ => todo!(),
             };
-    
+
             unsafe {
                 ShowCursor(true);
                 SetCursor(Some(cursor));
             }
         } else {
-            unsafe { ShowCursor(false); }
+            unsafe {
+                ShowCursor(false);
+            }
         }
     }
 
@@ -282,7 +344,7 @@ impl OsWindowInterface for OsWindow {
             SetCursorPos(point.x, point.y).unwrap();
         }
     }
-    
+
     fn poll_events(&self) -> Result<(), Error> {
         Ok(())
     }
@@ -297,25 +359,38 @@ impl Drop for OsWindow {
             UnhookWindowsHookEx(self.hook_handle).unwrap();
             RevokeDragDrop(self.hwnd()).unwrap();
             DestroyWindow(self.hwnd()).unwrap();
-            UnregisterClassW(PCWSTR(self.window_class as _), Some(PLUGIN_HINSTANCE.with(|hinstance| *hinstance))).unwrap();
+            UnregisterClassW(
+                PCWSTR(self.window_class as _),
+                Some(PLUGIN_HINSTANCE.with(|hinstance| *hinstance)),
+            )
+            .unwrap();
         }
     }
 }
 
 impl HasWindowHandle for OsWindow {
-    fn window_handle(&self) -> Result<raw_window_handle::WindowHandle<'_>, raw_window_handle::HandleError> {
+    fn window_handle(
+        &self,
+    ) -> Result<raw_window_handle::WindowHandle<'_>, raw_window_handle::HandleError> {
         let raw_window_handle = RawWindowHandle::Win32(self.window_handle);
         Ok(unsafe { raw_window_handle::WindowHandle::borrow_raw(raw_window_handle) })
     }
 }
 
 impl HasDisplayHandle for OsWindow {
-    fn display_handle(&self) -> Result<raw_window_handle::DisplayHandle<'_>, raw_window_handle::HandleError> {
+    fn display_handle(
+        &self,
+    ) -> Result<raw_window_handle::DisplayHandle<'_>, raw_window_handle::HandleError> {
         Ok(raw_window_handle::DisplayHandle::windows())
     }
 }
 
-unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+unsafe extern "system" fn wnd_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
     let window_ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut OsWindow;
     if window_ptr.is_null() {
         return unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) };
@@ -328,85 +403,92 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 window.update_modifiers();
                 window.button_down(MouseButton::Left, window.logical_mouse_position(lparam));
                 LRESULT(0)
-            },
-    
+            }
+
             WM_LBUTTONUP => {
                 window.update_modifiers();
                 window.button_up(MouseButton::Left, window.logical_mouse_position(lparam));
                 LRESULT(0)
-            },
-    
+            }
+
             WM_MBUTTONDOWN => {
                 window.update_modifiers();
                 window.button_down(MouseButton::Middle, window.logical_mouse_position(lparam));
                 LRESULT(0)
-            },
-    
+            }
+
             WM_MBUTTONUP => {
                 window.update_modifiers();
                 window.button_up(MouseButton::Middle, window.logical_mouse_position(lparam));
                 LRESULT(0)
-            },
-    
+            }
+
             WM_RBUTTONDOWN => {
                 window.update_modifiers();
                 window.button_down(MouseButton::Right, window.logical_mouse_position(lparam));
                 LRESULT(0)
-            },
-    
+            }
+
             WM_RBUTTONUP => {
                 window.update_modifiers();
                 window.button_up(MouseButton::Right, window.logical_mouse_position(lparam));
                 LRESULT(0)
-            },
-    
+            }
+
             WM_MOVE => {
                 window.moved.store(true, Ordering::Release);
                 LRESULT(0)
-            },
-    
+            }
+
             WM_MOUSELEAVE => {
                 window.send_event(Event::MouseExited);
                 LRESULT(0)
-            },
-    
+            }
+
             WM_MOUSEMOVE => {
                 window.update_modifiers();
-                window.send_event(Event::MouseMoved { position: window.logical_mouse_position(lparam) });
+                window.send_event(Event::MouseMoved {
+                    position: window.logical_mouse_position(lparam),
+                });
                 LRESULT(0)
-            },
-    
+            }
+
             WM_MOUSEWHEEL => {
                 window.update_modifiers();
 
                 let wheel_delta: i16 = u16::cast_signed((wparam.0 >> 16) as u16);
                 let x: i16 = u16::cast_signed(((lparam.0 as usize) & 0xFFFF) as u16);
                 let y: i16 = u16::cast_signed(((lparam.0 as usize) >> 16) as u16);
-    
-                let mut position = POINT { x: x as i32, y: y as i32 };
+
+                let mut position = POINT {
+                    x: x as i32,
+                    y: y as i32,
+                };
                 let result = unsafe { ScreenToClient(hwnd, &mut position) };
                 assert!(result.as_bool());
-    
+
                 window.send_event(Event::MouseWheel {
-                    position: LogicalPosition { x: position.x as f64, y: position.y as f64 },
-                    delta_x: 0.0,
-                    delta_y: wheel_delta as f64 / 120.0,
+                    position: LogicalPosition {
+                        x: position.x as f64,
+                        y: position.y as f64,
+                    },
+                    delta: ScrollDelta::LineDelta(0.0, wheel_delta as f64 / 120.0),
                 });
-    
+
                 LRESULT(0)
-            },
-    
+            }
+
             WM_USER_CHAR => {
                 let string = OsString::from_wide(&[wparam.0 as _]);
-                
+
                 window.send_event(Event::KeyDown {
                     key_code: Code::Unidentified,
                     text: Some(string.to_string_lossy().to_string()),
                 });
 
                 LRESULT(0)
-            },
-    
+            }
+
             WM_USER_KEY_DOWN => {
                 window.send_event(Event::KeyDown {
                     key_code: unsafe { transmute::<u8, keyboard_types::Code>(wparam.0 as u8) },
@@ -414,8 +496,8 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 });
 
                 LRESULT(0)
-            },
-    
+            }
+
             WM_USER_KEY_UP => {
                 window.send_event(Event::KeyUp {
                     key_code: unsafe { transmute::<u8, keyboard_types::Code>(wparam.0 as u8) },
@@ -423,15 +505,15 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 });
 
                 LRESULT(0)
-            },
+            }
 
             WM_USER_FRAME_TIMER => {
                 window.update_modifiers();
                 window.send_event(Event::Draw);
 
                 LRESULT(0)
-            },
-    
+            }
+
             _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
         }
     } else {
@@ -460,12 +542,12 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
             let x: u16 = i16::cast_unsigned(position.x as i16);
             let y: u16 = i16::cast_unsigned(position.y as i16);
 
-            // TODO: Convert modifiers            
-            let wparam = WPARAM(mouse_hook_struct.mouseData as usize & 0xFFFF0000);            
+            // TODO: Convert modifiers
+            let wparam = WPARAM(mouse_hook_struct.mouseData as usize & 0xFFFF0000);
             let lparam = LPARAM(usize::cast_signed(x as usize + ((y as usize) << 16)));
             unsafe { PostMessageW(Some(hwnd), WM_MOUSEWHEEL, wparam, lparam).unwrap() };
-        },
-        _ => {},
+        }
+        _ => {}
     }
 
     unsafe { CallNextHookEx(None, code, wparam, lparam) }
@@ -485,7 +567,8 @@ fn frame_pacing_thread(hwnd: usize, running: Arc<AtomicBool>, moved: Arc<AtomicB
             let waited = is_windows10_or_greater() && wait_for_vblank_dxgi(hwnd, &mut maybe_output);
 
             // Fall back to DWM
-            let waited = waited || (DwmIsCompositionEnabled().unwrap_or_default().as_bool() && DwmFlush().is_ok());
+            let waited = waited
+                || (DwmIsCompositionEnabled().unwrap_or_default().as_bool() && DwmFlush().is_ok());
 
             // Fall back to waiting
             if !waited {
@@ -503,9 +586,9 @@ fn wait_for_vblank_dxgi(hwnd: HWND, maybe_output: &mut Option<IDXGIOutput>) -> b
         if maybe_output.is_none() {
             let dxgi_factory = CreateDXGIFactory::<IDXGIFactory>().unwrap();
             let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY);
-        
+
             let mut adapter_index = 0;
-    
+
             'outer: while let Ok(adapter) = dxgi_factory.EnumAdapters(adapter_index) {
                 let mut output_index = 0;
                 while let Ok(output) = adapter.EnumOutputs(output_index) {
@@ -514,17 +597,17 @@ fn wait_for_vblank_dxgi(hwnd: HWND, maybe_output: &mut Option<IDXGIOutput>) -> b
                         *maybe_output = Some(output);
                         break 'outer;
                     }
-    
+
                     output_index += 1;
                 }
-    
+
                 adapter_index += 1;
             }
         }
-    
+
         if let Some(output) = maybe_output.as_ref() {
             output.WaitForVBlank().unwrap();
-            true    
+            true
         } else {
             false
         }
