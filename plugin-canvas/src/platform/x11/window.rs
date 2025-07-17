@@ -107,6 +107,7 @@ impl OsWindow {
 
                 let mut xkb_state = self.xkb_state.borrow_mut();
                 let mut xkb_compose_state = self.xkb_compose_state.borrow_mut();
+                let repeat = xkb_state.get_keymap().key_repeats(x11_keycode);
 
                 // See if we get any compose events
                 for keysym in xkb_state.key_get_syms(x11_keycode) {
@@ -117,6 +118,7 @@ impl OsWindow {
                             self.send_event(Event::KeyDown {
                                 key_code: keycode,
                                 text: Some(text),
+                                repeat,
                             });
 
                             sent_event_with_text = true;
@@ -133,6 +135,7 @@ impl OsWindow {
                     self.send_event(Event::KeyDown {
                         key_code: keycode,
                         text: Some(text),
+                        repeat,
                     });
                 }
             }

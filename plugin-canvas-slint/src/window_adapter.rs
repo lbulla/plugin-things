@@ -183,10 +183,19 @@ impl PluginCanvasWindowAdapter {
                 EventResponse::Handled
             }
 
-            plugin_canvas::Event::KeyDown { key_code, text } => {
+            plugin_canvas::Event::KeyDown {
+                key_code,
+                text,
+                repeat,
+            } => {
                 if let Some(text) = Self::convert_key(*key_code, text) {
-                    self.slint_window
-                        .dispatch_event(WindowEvent::KeyPressed { text: text.into() });
+                    if *repeat {
+                        self.slint_window
+                            .dispatch_event(WindowEvent::KeyPressRepeated { text: text.into() });
+                    } else {
+                        self.slint_window
+                            .dispatch_event(WindowEvent::KeyPressed { text: text.into() });
+                    }
                 }
 
                 EventResponse::Handled

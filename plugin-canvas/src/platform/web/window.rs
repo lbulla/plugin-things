@@ -170,6 +170,7 @@ impl OsWindowInterface for OsWindow {
                             Event::KeyDown {
                                 key_code,
                                 text: Some(text),
+                                repeat: web_event.repeat(),
                             }
                         );
                     }

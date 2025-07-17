@@ -456,9 +456,9 @@ unsafe extern "system" fn wnd_proc(
             WM_MOUSEWHEEL => {
                 window.update_modifiers();
 
-                let wheel_delta: i16 = u16::cast_signed((wparam.0 >> 16) as u16);
-                let x: i16 = u16::cast_signed(((lparam.0 as usize) & 0xFFFF) as u16);
-                let y: i16 = u16::cast_signed(((lparam.0 as usize) >> 16) as u16);
+                let wheel_delta: i16 = hiword(wparam.0);
+                let x: i16 = unsafe { mem::transmute(loword(lparam.0 as _)) };
+                let y: i16 = unsafe { mem::transmute(hiword(lparam.0 as _)) };
 
                 let mut position = POINT {
                     x: x as i32,
@@ -484,6 +484,7 @@ unsafe extern "system" fn wnd_proc(
                 window.send_event(Event::KeyDown {
                     key_code: Code::Unidentified,
                     text: Some(string.to_string_lossy().to_string()),
+                    repeat: loword(lparam.0 as _) > 0,
                 });
 
                 LRESULT(0)
@@ -493,6 +494,7 @@ unsafe extern "system" fn wnd_proc(
                 window.send_event(Event::KeyDown {
                     key_code: unsafe { transmute::<u8, keyboard_types::Code>(wparam.0 as u8) },
                     text: None,
+                    repeat: loword(lparam.0 as _) > 0,
                 });
 
                 LRESULT(0)
@@ -539,12 +541,14 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
     match wparam.0 as u32 {
         WM_MOUSEWHEEL => {
             let position = &mouse_hook_struct.Base.pt;
-            let x: u16 = i16::cast_unsigned(position.x as i16);
-            let y: u16 = i16::cast_unsigned(position.y as i16);
+            let x: u16 = unsafe { mem::transmute(position.x as i16) };
+            let y: u16 = unsafe { mem::transmute(position.y as i16) };
 
             // TODO: Convert modifiers
             let wparam = WPARAM(mouse_hook_struct.mouseData as usize & 0xFFFF0000);
-            let lparam = LPARAM(usize::cast_signed(x as usize + ((y as usize) << 16)));
+            let lparam = LPARAM(unsafe {
+                mem::transmute::<usize, isize>(x as usize + ((y as usize) << 16))
+            });
             unsafe { PostMessageW(Some(hwnd), WM_MOUSEWHEEL, wparam, lparam).unwrap() };
         }
         _ => {}
@@ -612,4 +616,12 @@ fn wait_for_vblank_dxgi(hwnd: HWND, maybe_output: &mut Option<IDXGIOutput>) -> b
             false
         }
     }
+}
+
+fn loword(word: usize) -> u16 {
+    (word & 0xFFFF) as _
+}
+
+fn hiword(word: usize) -> u16 {
+    (word >> 16) as _
 }
