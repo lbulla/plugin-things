@@ -388,12 +388,13 @@ impl OsWindowView {
     }
 
     unsafe extern "C" fn key_down(&self, _cmd: Sel, event: *const NSEvent) {
-        let code = unsafe { (*event).keyCode() };
+        let (code, repeat) = unsafe { ((*event).keyCode(), (*event).isARepeat()) };
         let text = self.key_event_text(event);
 
         self.send_event(Event::KeyDown {
             key_code: key_event_to_keyboard_type_code(code),
             text,
+            repeat,
         });
     }
 

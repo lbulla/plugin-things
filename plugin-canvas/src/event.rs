@@ -24,6 +24,7 @@ pub enum Event {
     KeyDown {
         key_code: keyboard_types::Code,
         text: Option<String>,
+        repeat: bool,
     },
 
     KeyUp {

@@ -460,9 +460,9 @@ unsafe extern "system" fn wnd_proc(
             WM_MOUSEWHEEL => {
                 window.update_modifiers();
 
-                let wheel_delta: i16 = u16::cast_signed((wparam.0 >> 16) as u16);
-                let x: i16 = u16::cast_signed(((lparam.0 as usize) & 0xFFFF) as u16);
-                let y: i16 = u16::cast_signed(((lparam.0 as usize) >> 16) as u16);
+                let wheel_delta: i16 = hiword(wparam.0);
+                let x: i16 = loword(lparam.0 as _);
+                let y: i16 = hiword(lparam.0 as _);
 
                 let mut position = POINT {
                     x: x as i32,
@@ -488,6 +488,7 @@ unsafe extern "system" fn wnd_proc(
                 window.send_event(Event::KeyDown {
                     key_code: Code::Unidentified,
                     text: Some(string.to_string_lossy().to_string()),
+                    repeat: loword(lparam.0 as _) > 0,
                 });
 
                 LRESULT(0)
@@ -497,6 +498,7 @@ unsafe extern "system" fn wnd_proc(
                 window.send_event(Event::KeyDown {
                     key_code: unsafe { transmute::<u8, keyboard_types::Code>(wparam.0 as u8) },
                     text: None,
+                    repeat: loword(lparam.0 as _) > 0,
                 });
 
                 LRESULT(0)
@@ -616,4 +618,12 @@ fn wait_for_vblank_dxgi(hwnd: HWND, maybe_output: &mut Option<IDXGIOutput>) -> b
             false
         }
     }
+}
+
+fn loword(param: usize) -> i16 {
+    u16::cast_signed((param & 0xFFFF) as u16)
+}
+
+fn hiword(param: usize) -> i16 {
+    u16::cast_signed((param >> 16) as u16)
 }
