@@ -1,19 +1,38 @@
-use std::{cell::RefCell, ptr::{null_mut, NonNull}, sync::{atomic::{AtomicBool, Ordering}, Arc}};
+use std::{
+    cell::RefCell,
+    ptr::{NonNull, null_mut},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 use cursor_icon::CursorIcon;
-use objc2::{msg_send, rc::{Allocated, Retained}, sel, AllocAnyThread};
-use objc2_app_kit::{NSCursor, NSCursorFrameResizeDirections, NSCursorFrameResizePosition, NSHorizontalDirections, NSPasteboardTypeFileURL, NSScreen, NSTrackingArea, NSTrackingAreaOptions, NSVerticalDirections, NSView};
+use objc2::{
+    AllocAnyThread, msg_send,
+    rc::{Allocated, Retained},
+    sel,
+};
+use objc2_app_kit::{
+    NSCursor, NSCursorFrameResizeDirections, NSCursorFrameResizePosition, NSHorizontalDirections,
+    NSPasteboardTypeFileURL, NSScreen, NSTrackingArea, NSTrackingAreaOptions, NSVerticalDirections,
+    NSView,
+};
 use objc2_core_foundation::{CGPoint, CGSize};
 use objc2_core_graphics::CGWarpMouseCursorPosition;
-use objc2_foundation::{MainThreadMarker, NSArray, NSDefaultRunLoopMode, NSPoint, NSRect, NSRunLoop, NSSize};
+use objc2_foundation::{
+    MainThreadMarker, NSArray, NSDefaultRunLoopMode, NSPoint, NSRect, NSRunLoop, NSSize,
+};
 use objc2_quartz_core::CADisplayLink;
 use raw_window_handle::{AppKitWindowHandle, HasDisplayHandle, HasWindowHandle, RawWindowHandle};
 
-use crate::{platform::os_window_handle::OsWindowHandle, thread_bound::ThreadBound, Event, LogicalPosition};
 use crate::error::Error;
 use crate::event::{EventCallback, EventResponse};
 use crate::platform::interface::OsWindowInterface;
 use crate::window::WindowAttributes;
+use crate::{
+    Event, LogicalPosition, platform::os_window_handle::OsWindowHandle, thread_bound::ThreadBound,
+};
 
 use super::view::OsWindowView;
 
@@ -50,24 +69,28 @@ impl OsWindowInterface for OsWindow {
 
         let view_class = OsWindowView::register_class();
 
-        let physical_size = crate::PhysicalSize::from_logical(&window_attributes.size, window_attributes.scale);
+        let physical_size =
+            crate::PhysicalSize::from_logical(&window_attributes.size, window_attributes.scale);
 
         let view_rect = NSRect::new(
             NSPoint { x: 0.0, y: 0.0 },
-            NSSize { width: physical_size.width as f64, height: physical_size.height as f64 },
+            NSSize {
+                width: physical_size.width as f64,
+                height: physical_size.height as f64,
+            },
         );
 
         let (view, window_handle) = unsafe {
             let view: Allocated<OsWindowView> = msg_send![view_class, alloc];
             let view: Retained<OsWindowView> = msg_send![view, initWithFrame: view_rect];
-        
+
             let tracking_area = NSTrackingArea::initWithRect_options_owner_userInfo(
                 NSTrackingArea::alloc(),
                 view_rect,
-                NSTrackingAreaOptions::MouseEnteredAndExited |
-                NSTrackingAreaOptions::MouseMoved |
-                NSTrackingAreaOptions::ActiveAlways |
-                NSTrackingAreaOptions::InVisibleRect,
+                NSTrackingAreaOptions::MouseEnteredAndExited
+                    | NSTrackingAreaOptions::MouseMoved
+                    | NSTrackingAreaOptions::ActiveAlways
+                    | NSTrackingAreaOptions::InVisibleRect,
                 Some(&view),
                 None,
             );
@@ -76,13 +99,13 @@ impl OsWindowInterface for OsWindow {
             let dragged_types = NSArray::arrayWithObject(NSPasteboardTypeFileURL);
             view.registerForDraggedTypes(&dragged_types);
 
-            let parent_view: &mut NSView = &mut *(parent_window_handle.ns_view.as_ptr() as *mut NSView);
+            let parent_view: &mut NSView =
+                &mut *(parent_window_handle.ns_view.as_ptr() as *mut NSView);
             parent_view.addSubview(&view);
-    
-            let window_handle = AppKitWindowHandle::new(
-                NonNull::new(view.as_ref() as *const NSView as _).unwrap()
-            );
-    
+
+            let window_handle =
+                AppKitWindowHandle::new(NonNull::new(view.as_ref() as *const NSView as _).unwrap());
+
             (view, window_handle)
         };
 
@@ -137,7 +160,7 @@ impl OsWindowInterface for OsWindow {
                 CursorIcon::Help => NSCursor::arrowCursor(), // TODO
                 CursorIcon::Pointer => NSCursor::pointingHandCursor(),
                 CursorIcon::Progress => NSCursor::arrowCursor(), // TODO,
-                CursorIcon::Wait => NSCursor::arrowCursor(), // TODO
+                CursorIcon::Wait => NSCursor::arrowCursor(),     // TODO
                 CursorIcon::Cell => NSCursor::crosshairCursor(),
                 CursorIcon::Crosshair => NSCursor::crosshairCursor(),
                 CursorIcon::Text => NSCursor::IBeamCursor(),
@@ -149,18 +172,44 @@ impl OsWindowInterface for OsWindow {
                 CursorIcon::NotAllowed => NSCursor::operationNotAllowedCursor(),
                 CursorIcon::Grab => NSCursor::openHandCursor(),
                 CursorIcon::Grabbing => NSCursor::closedHandCursor(),
-                CursorIcon::EResize => NSCursor::columnResizeCursorInDirections(NSHorizontalDirections::Right),
-                CursorIcon::NResize => NSCursor::rowResizeCursorInDirections(NSVerticalDirections::Up),
-                CursorIcon::NeResize => NSCursor::frameResizeCursorFromPosition_inDirections(NSCursorFrameResizePosition::TopRight, NSCursorFrameResizeDirections::Outward),
-                CursorIcon::NwResize => NSCursor::frameResizeCursorFromPosition_inDirections(NSCursorFrameResizePosition::TopLeft, NSCursorFrameResizeDirections::Outward),
-                CursorIcon::SResize => NSCursor::rowResizeCursorInDirections(NSVerticalDirections::Down),
-                CursorIcon::SeResize => NSCursor::frameResizeCursorFromPosition_inDirections(NSCursorFrameResizePosition::BottomRight, NSCursorFrameResizeDirections::Outward),
-                CursorIcon::SwResize => NSCursor::frameResizeCursorFromPosition_inDirections(NSCursorFrameResizePosition::BottomLeft, NSCursorFrameResizeDirections::Outward),
-                CursorIcon::WResize => NSCursor::columnResizeCursorInDirections(NSHorizontalDirections::Left),
+                CursorIcon::EResize => {
+                    NSCursor::columnResizeCursorInDirections(NSHorizontalDirections::Right)
+                }
+                CursorIcon::NResize => {
+                    NSCursor::rowResizeCursorInDirections(NSVerticalDirections::Up)
+                }
+                CursorIcon::NeResize => NSCursor::frameResizeCursorFromPosition_inDirections(
+                    NSCursorFrameResizePosition::TopRight,
+                    NSCursorFrameResizeDirections::Outward,
+                ),
+                CursorIcon::NwResize => NSCursor::frameResizeCursorFromPosition_inDirections(
+                    NSCursorFrameResizePosition::TopLeft,
+                    NSCursorFrameResizeDirections::Outward,
+                ),
+                CursorIcon::SResize => {
+                    NSCursor::rowResizeCursorInDirections(NSVerticalDirections::Down)
+                }
+                CursorIcon::SeResize => NSCursor::frameResizeCursorFromPosition_inDirections(
+                    NSCursorFrameResizePosition::BottomRight,
+                    NSCursorFrameResizeDirections::Outward,
+                ),
+                CursorIcon::SwResize => NSCursor::frameResizeCursorFromPosition_inDirections(
+                    NSCursorFrameResizePosition::BottomLeft,
+                    NSCursorFrameResizeDirections::Outward,
+                ),
+                CursorIcon::WResize => {
+                    NSCursor::columnResizeCursorInDirections(NSHorizontalDirections::Left)
+                }
                 CursorIcon::EwResize => NSCursor::columnResizeCursor(),
                 CursorIcon::NsResize => NSCursor::rowResizeCursor(),
-                CursorIcon::NeswResize => NSCursor::frameResizeCursorFromPosition_inDirections(NSCursorFrameResizePosition::TopRight, NSCursorFrameResizeDirections::All),
-                CursorIcon::NwseResize => NSCursor::frameResizeCursorFromPosition_inDirections(NSCursorFrameResizePosition::TopLeft, NSCursorFrameResizeDirections::All),
+                CursorIcon::NeswResize => NSCursor::frameResizeCursorFromPosition_inDirections(
+                    NSCursorFrameResizePosition::TopRight,
+                    NSCursorFrameResizeDirections::All,
+                ),
+                CursorIcon::NwseResize => NSCursor::frameResizeCursorFromPosition_inDirections(
+                    NSCursorFrameResizePosition::TopLeft,
+                    NSCursorFrameResizeDirections::All,
+                ),
                 CursorIcon::ColResize => NSCursor::columnResizeCursor(),
                 CursorIcon::RowResize => NSCursor::rowResizeCursor(),
                 CursorIcon::AllScroll => NSCursor::openHandCursor(),
@@ -168,7 +217,7 @@ impl OsWindowInterface for OsWindow {
                 CursorIcon::ZoomOut => NSCursor::arrowCursor(), // TODO
                 _ => todo!(),
             };
-    
+
             cursor.set();
 
             if self.cursor_hidden.swap(false, Ordering::Relaxed) {
@@ -184,13 +233,23 @@ impl OsWindowInterface for OsWindow {
     }
 
     fn warp_mouse(&self, position: LogicalPosition) {
-        let window_position = self.view().convertPoint_toView(CGPoint::new(position.x, position.y), None);
-        let screen_position = self.view().window().unwrap().convertPointToScreen(window_position);
-        let screen_height = NSScreen::mainScreen(self.main_thread_marker).unwrap().frame().size.height;
+        let window_position = self
+            .view()
+            .convertPoint_toView(CGPoint::new(position.x, position.y), None);
+        let screen_position = self
+            .view()
+            .window()
+            .unwrap()
+            .convertPointToScreen(window_position);
+        let screen_height = NSScreen::mainScreen(self.main_thread_marker)
+            .unwrap()
+            .frame()
+            .size
+            .height;
         let cg_point = CGPoint::new(screen_position.x, screen_height - screen_position.y);
         CGWarpMouseCursorPosition(cg_point);
     }
-    
+
     fn poll_events(&self) -> Result<(), Error> {
         Ok(())
     }
@@ -199,9 +258,7 @@ impl OsWindowInterface for OsWindow {
 impl Drop for OsWindow {
     fn drop(&mut self) {
         if let Some(display_link) = self.display_link.borrow().as_ref() {
-            unsafe {
-                display_link.invalidate();
-            };
+            display_link.invalidate();
         }
 
         self.view().set_os_window_ptr(null_mut());
@@ -209,13 +266,17 @@ impl Drop for OsWindow {
 }
 
 impl HasDisplayHandle for OsWindow {
-    fn display_handle(&self) -> Result<raw_window_handle::DisplayHandle<'_>, raw_window_handle::HandleError> {
+    fn display_handle(
+        &self,
+    ) -> Result<raw_window_handle::DisplayHandle<'_>, raw_window_handle::HandleError> {
         Ok(raw_window_handle::DisplayHandle::appkit())
     }
 }
 
 impl HasWindowHandle for OsWindow {
-    fn window_handle(&self) -> Result<raw_window_handle::WindowHandle<'_>, raw_window_handle::HandleError> {
+    fn window_handle(
+        &self,
+    ) -> Result<raw_window_handle::WindowHandle<'_>, raw_window_handle::HandleError> {
         let raw_window_handle = RawWindowHandle::AppKit(self.window_handle);
         Ok(unsafe { raw_window_handle::WindowHandle::borrow_raw(raw_window_handle) })
     }
